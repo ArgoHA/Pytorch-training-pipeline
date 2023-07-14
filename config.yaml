@@ -1,0 +1,32 @@
+project_name: screen detection
+exp: clean
+
+
+train:
+  root: /workspace/screen_detection_cnn
+
+  model_name: shuffle_net # shuffle_net, eficient_net_b0
+
+  train_split: 0.8
+  val_split: 0.1
+
+  device: cuda
+  batch_size: 256
+  epochs: 9
+
+  layers_to_train: -1
+
+  threads_to_use: 16
+  num_workers: 14
+
+  data_path: ${train.root}/dataset
+  models_path: ${train.root}/models
+  path_to_save: ${train.models_path}/${exp}
+
+  seed: 42
+
+
+inference:
+  model_path: ${train.path_to_save}
+  path_to_data: ${train.root}/to_test
+  export_device: cpu
