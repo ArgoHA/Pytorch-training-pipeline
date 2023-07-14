@@ -1,4 +1,4 @@
-# pytorch_training_pipeline
+# Pytorch training pipeline
 This is PyTorch training pipeline example with hydra configs, wandb and exports to ONNX, TF, TFLite
 
 ### Config
