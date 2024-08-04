@@ -6,20 +6,18 @@ import loguru
 import numpy as np
 from omegaconf import DictConfig
 from sklearn.model_selection import train_test_split
-
-from src.utils import get_class_names
+from src.ptypes import class_names
 
 
 def get_stats(root_path: Path) -> Tuple[List[Path], List[int], Dict[str, int]]:
     image_paths = []
     labels = []
     classes = {}
-
-    im_folder_names = get_class_names(root_path)
     label = 0
 
-    for class_name in im_folder_names:
+    for class_name in class_names:
         class_dir = root_path / class_name
+
         if str(class_dir.name).startswith("."):  # skip .folders
             continue
 
@@ -28,7 +26,7 @@ def get_stats(root_path: Path) -> Tuple[List[Path], List[int], Dict[str, int]]:
                 continue
             classes[class_dir.name] = classes.get(class_dir.name, 0) + 1
 
-            image_paths.append(class_dir / file_name)
+            image_paths.append(Path(class_name) / file_name.name)
             labels.append(label)
 
         label += 1
@@ -49,9 +47,7 @@ def split(
         test_split = 0
 
     indices = np.arange(len(image_paths))
-    train_idxs, temp_idxs = train_test_split(
-        indices, test_size=(1 - train_split), stratify=labels
-    )
+    train_idxs, temp_idxs = train_test_split(indices, test_size=(1 - train_split), stratify=labels)
 
     if test_split:
         test_idxs, val_idxs = train_test_split(

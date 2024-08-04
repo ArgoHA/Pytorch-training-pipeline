@@ -5,20 +5,20 @@ import hydra
 import loguru
 import pypdfium2 as pdfium
 from omegaconf import DictConfig
-from PIL import Image
+from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
 from tqdm import tqdm
 
 
-def convert_pdf_to_jpg(pdf_path: Path) -> None:
+def convert_pdf_to_jpg(pdf_path: Path, dpi: int = 200) -> None:
     """
-    Convert pdf to .jpg format
+    Convert pdf to .jpg format with specified DPI (default: 200).
     """
     pages = pdfium.PdfDocument(pdf_path)
-    for i, _ in enumerate(pages):
-        image = pages.get_page(i)
-        pil_image = image.render().to_pil().convert("RGB")
-        pil_image.save(pdf_path.with_suffix(f".{i}.jpg"))
+    for i, page in enumerate(pages):
+        pil_image = page.render(scale=dpi / 72.0).to_pil().convert("RGB")
+        output_path = pdf_path.with_name(f"{pdf_path.stem}_{i}.jpg")
+        pil_image.save(output_path)
 
     pdf_path.unlink()
 
@@ -30,13 +30,30 @@ def convert_image_to_jpg(filepath: Path) -> None:
     if filepath.suffix.lower() in [".tif", ".jpeg", ".png", ".tiff", ".heic"]:
         try:
             image = Image.open(filepath).convert("RGB")
+            image = ImageOps.exif_transpose(image)  # fix rotation
         except OSError:
-            print("Can't open:", filepath.name)
+            print("Can't open, deleting:", filepath.name)
             filepath.unlink()
             return
 
+        # if img_name.jpg and img_name.png (or other) exists, rename them
+        f_idx = 1
+        original_filepath = filepath
+        while filepath.with_suffix(".jpg").exists() and f_idx <= 100:
+            if f_idx > 1:
+                filepath = (
+                    filepath.parent / f"{str(filepath.stem).rsplit('_', 1)[0]}_{f_idx}"
+                ).with_suffix(".jpg")
+            else:
+                filepath = (filepath.parent / f"{filepath.stem}_{f_idx}").with_suffix(".jpg")
+            f_idx += 1
+
+        if f_idx == 100:
+            print("Can't save:", filepath.name)
+            return
+
         image.save(filepath.with_suffix(".jpg"))
-        filepath.unlink()
+        original_filepath.unlink()
 
     elif filepath.suffix.lower() == ".pdf":
         convert_pdf_to_jpg(filepath)
@@ -54,9 +71,7 @@ def convert_images_to_jpg(dir_path: Path, num_threads: int) -> None:
 
     with mp.Pool(processes=num_threads) as pool:
         filepaths = [
-            filepath
-            for filepath in dir_path.glob("*")
-            if not filepath.name.startswith(".")
+            filepath for filepath in dir_path.glob("*") if not filepath.name.startswith(".")
         ]
 
         for _ in tqdm(pool.imap_unordered(convert_image_to_jpg, filepaths)):
@@ -66,9 +81,7 @@ def convert_images_to_jpg(dir_path: Path, num_threads: int) -> None:
     lost_files = set(all_files) - set(jpg_files)
 
     if not lost_files:
-        loguru.logger.info(
-            f"All files were converted to .jpg, total amount: {len(jpg_files)}"
-        )
+        loguru.logger.info(f"All files were converted to .jpg, total amount: {len(jpg_files)}")
     else:
         loguru.logger.warning(
             f"Not converted to .jpg, amount: {len(lost_files)}, files: {lost_files}"
@@ -77,10 +90,12 @@ def convert_images_to_jpg(dir_path: Path, num_threads: int) -> None:
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
-    root_path = Path(cfg.train.data_path)
-    for images_dir in root_path.iterdir():
-        if images_dir.is_dir() and not images_dir.name.startswith("."):
-            convert_images_to_jpg(images_dir, cfg.train.threads_to_use)
+    paths = {"root_path": Path(cfg.train.data_path), "test_path": Path(cfg.export.path_to_data)}
+
+    for _, data_path in paths.items():
+        for images_dir in data_path.iterdir():
+            if images_dir.is_dir() and not images_dir.name.startswith("."):
+                convert_images_to_jpg(images_dir, cfg.train.threads_to_use)
 
 
 if __name__ == "__main__":

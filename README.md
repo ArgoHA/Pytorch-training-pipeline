@@ -8,8 +8,6 @@ This is PyTorch training pipeline example with hydra configs, wandb and exports 
 
 *root* - your local repo name
 
-*model_name* - in this repo I usesd two models - ShuffleNet_V2_X0_5, EfficientNet_B0 (shuffle_net, eficient_net_b0)
-
 *layers_to_train* - how many layers from the last one to require gradient. `-1` = 0 frozen layers
 
 ### Run
@@ -17,6 +15,5 @@ This is PyTorch training pipeline example with hydra configs, wandb and exports 
 python -m src.etl.preprocess
 python -m src.etl.split
 python -m src.dl.train
-python -m src.dl.inference
 python -m src.dl.export
 ```

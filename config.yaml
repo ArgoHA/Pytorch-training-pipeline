@@ -1,32 +1,55 @@
-project_name: screen detection
-exp: clean
+project_name: project_name
+exp_name: baseline
 
+exp: ${exp_name}_${now_dir}
 
 train:
-  root: /workspace/screen_detection_cnn
+  root: /path/to.progect
+  device: cuda
 
-  model_name: shuffle_net # shuffle_net, eficient_net_b0
+  label_to_name: {0: "class_1", 1: "class_2", 2: "class_3"}
+  img_size: [256, 256]
 
   train_split: 0.8
   val_split: 0.1
 
-  device: cuda
-  batch_size: 256
-  epochs: 9
+  batch_size: 64
+  epochs: 15
+  use_scheduler: True
 
   layers_to_train: -1
 
-  threads_to_use: 16
-  num_workers: 14
+  num_workers: 10
+  threads_to_use: 10
 
   data_path: ${train.root}/dataset
-  models_path: ${train.root}/models
-  path_to_save: ${train.models_path}/${exp}
+  path_to_save: ${train.root}/output/models/${exp}
 
   seed: 42
+  cudnn_fixed: False
+  debug_img_processing: False
 
 
-inference:
+export:
+  trt: True # must be done on inference device
+  trt_half: False
+  max_batch_size: 1
+
   model_path: ${train.path_to_save}
   path_to_data: ${train.root}/to_test
-  export_device: cpu
+  vis_path: ${train.root}/output/visualized
+
+
+
+### service ###
+defaults:
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+now_dir: &nowdir ${now:%Y-%m-%d}
