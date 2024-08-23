@@ -130,7 +130,7 @@ class Loader:
                 self.splits[split_name] = []
 
     def print_class_distribution(self) -> None:
-        all_data = pd.concat([split for split in self.splits.values() if split is not None])
+        all_data = pd.concat([split for split in self.splits.values() if np.any(split)])
         class_counts = all_data[1].value_counts().sort_index()
         class_distribution = {}
         for class_id, count in class_counts.items():
@@ -168,6 +168,7 @@ class Loader:
         val_loader = self._build_dataloader_impl(val_ds)
 
         test_loader = None
+        test_ds = []
         if len(self.splits["test"]):
             test_ds = CustomDataset(
                 self.img_size,

@@ -8,7 +8,7 @@ train:
   device: cuda
 
   label_to_name: {0: "class_1", 1: "class_2", 2: "class_3"}
-  img_size: [256, 256]
+  img_size: [256, 256] # (h, w)
 
   train_split: 0.8
   val_split: 0.1

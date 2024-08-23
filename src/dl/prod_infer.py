@@ -11,9 +11,9 @@ class CustomModel:
     MEAN_NORM = np.array([0.485, 0.456, 0.406], dtype=np.float32)
     STD_NORM = np.array([0.229, 0.224, 0.225], dtype=np.float32)
     INPUT_SIZE = [256, 256]
-    N_OUTPUTS = 3
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     CLASSES = {0: "class_1", 1: "class_2", 2: "class_3"}
+    N_OUTPUTS = len(CLASSES)
 
     def __init__(self, model_path: str):
         self.model = models.efficientnet_b0()
@@ -29,7 +29,7 @@ class CustomModel:
         self._test_pred()
 
     def _test_pred(self):
-        img = torch.rand(1, self.N_OUTPUTS, *self.INPUT_SIZE, device=self.DEVICE)
+        img = torch.rand(1, 3, *self.INPUT_SIZE, device=self.DEVICE)
         self.model(img)
 
     def _preprocess(self, image: Image) -> torch.Tensor:

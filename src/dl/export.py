@@ -3,36 +3,28 @@ from typing import Tuple
 
 import hydra
 import numpy as np
-import openvino.runtime as ov
+import onnx
+import openvino as ov
+import tensorflow as tf
 import tensorrt as trt
 import torch
 import torch.nn.functional as F
 import torch.onnx
 from omegaconf import DictConfig
-from src.ptypes import class_names
+from onnx_tf.backend import prepare
 from torch import nn
 
 from src.dl.train import build_model
+from src.ptypes import class_names
 
 INPUT_NAME = "input"
 OUTPUT_NAME = "output"
 
 
-class ModelWithProcess(nn.Module):
-    def __init__(self, original_model: nn.Module) -> None:
-        super(ModelWithProcess, self).__init__()
-        self.original_model = original_model
-
-    def forward(self, input_image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        output = self.original_model(input_image)
-        output = F.softmax(output, dim=-1)
-        return output
-
-
 def load_model(model_path: Path, num_classes: int, device: str) -> nn.Module:
     model = build_model(n_outputs=num_classes, device=device, layers_to_train=-1)
-    model.eval()
     model.load_state_dict(torch.load(model_path))
+    model.eval()
     return model
 
 
@@ -52,6 +44,12 @@ def export_to_onnx(
         output_names=[OUTPUT_NAME],
         dynamic_axes=dynamic_axes,
     )
+
+
+def export_to_openvino(model: nn.Module, ov_path: Path) -> None:
+    core = ov.Core()
+    ov_model = ov.convert_model(model)
+    ov.save_model(ov_model, ov_path)
 
 
 def export_to_tensorrt(
@@ -92,6 +90,24 @@ def export_to_tensorrt(
         f.write(engine)
 
 
+def export_to_tf(onnx_path: Path, tf_path: str) -> None:
+    onnx_model = onnx.load(onnx_path)
+    tf_rep = prepare(onnx_model)
+    tf_rep.export_graph(tf_path)
+
+
+def export_to_tflite(
+    tf_path: Path,
+    tflite_path: str,
+) -> None:
+    converter = tf.lite.TFLiteConverter.from_saved_model(tf_path)
+    converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    tflite_model = converter.convert()
+
+    with open(tflite_path, "wb") as f:
+        f.write(tflite_model)
+
+
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
     model_path = Path(cfg.export.model_path) / "model.pt"
@@ -99,16 +115,19 @@ def main(cfg: DictConfig) -> None:
 
     trt_path = model_path.parent / "model.engine"
     onnx_path = model_path.parent / "model.onnx"
-    ov_path = model_path.parent / "model_ov"
+    ov_path = model_path.parent / "model.xml"
+    tf_path = str(model_path.parent / "model.pb")
+    tflite_path = str(model_path.parent / "model.tflite")
 
     model = load_model(model_path, num_classes, cfg.train.device)
-    model = ModelWithProcess(model)
-    model.eval()
 
     x_test = torch.randn(1, 3, *cfg.train.img_size, requires_grad=True).to(cfg.train.device)
 
+    export_to_openvino(model, ov_path)
     export_to_onnx(model, onnx_path, x_test, cfg.export.max_batch_size)
     export_to_tensorrt(onnx_path, trt_path, cfg.export.trt_half, cfg.export.max_batch_size)
+    export_to_tf(onnx_path, tf_path)
+    export_to_tflite(tf_path, tflite_path)
 
 
 if __name__ == "__main__":

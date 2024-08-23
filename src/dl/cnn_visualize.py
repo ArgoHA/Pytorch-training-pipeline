@@ -7,11 +7,23 @@ import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from PIL import Image, ImageOps
+from torchvision import transforms
 from tqdm import tqdm
 
-from src.dl.infer import get_transforms
 from src.dl.train import prepare_model
-from src.ptypes import img_size, num_labels
+from src.ptypes import img_norms, img_size, num_labels
+
+
+def get_transforms(img: Image) -> torch.Tensor:
+    transform = transforms.Compose(
+        [
+            transforms.Resize(img_size),
+            transforms.Lambda(lambda x: x.convert("RGB")),
+            transforms.ToTensor(),
+            transforms.Normalize(*img_norms),
+        ]
+    )
+    return transform(img)
 
 
 def compute_gradcam(model, target_layer, img, target_class=None):
