@@ -423,6 +423,7 @@ def main(cfg: DictConfig) -> None:
                 path_to_save=Path(cfg.path_to_save),
                 mode="test",
             )
+            wandb_logger(None, test_metrics, mode="test")
 
         log_metrics_locally(
             all_metrics={"val": val_metrics, "test": test_metrics},
