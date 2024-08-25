@@ -1,14 +1,11 @@
 from pathlib import Path
-from typing import Tuple
 
 import hydra
-import numpy as np
 import onnx
 import openvino as ov
 import tensorflow as tf
 import tensorrt as trt
 import torch
-import torch.nn.functional as F
 import torch.onnx
 from omegaconf import DictConfig
 from onnx_tf.backend import prepare
