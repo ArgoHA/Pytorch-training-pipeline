@@ -280,6 +280,7 @@ def get_full_preds(
 
 def log_metrics_locally(all_metrics: Dict[str, Dict[str, float]], path_to_save: Path) -> None:
     metrics_df = pd.DataFrame.from_dict(all_metrics, orient="index")
+    metrics_df = metrics_df.round(4)
     if path_to_save:
         metrics_df.to_csv(path_to_save / "metrics.csv")
     print(metrics_df, "\n")
