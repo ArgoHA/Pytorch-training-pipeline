@@ -41,7 +41,7 @@ infer - run inferenc on test folder with subfolders = classes
 
 export - after training is done, you can get weights in other formats
 
-cnn_visualize - creates a heatmap visualisation based on last conv layer gradients
+cnn_visualize - creates a heatmap visualisation based on last conv layer gradients (gradcam)
 
 
 ### Created output
