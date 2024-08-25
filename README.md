@@ -8,7 +8,13 @@ This is PyTorch training pipeline example with hydra configs, wandb and exports 
 
 *root* - your local repo name
 
+*label_to_name* - classes to be trained on. Should be the same as you dataset folders naming
+
+*use_scheduler* - turns on CyclicLR with 2 cycles per full training
+
 *layers_to_train* - how many layers from the last one to require gradient. `-1` = 0 frozen layers
+
+*cudnn_fixed* - used for reproducibillity. Can affect performance.
 
 *export.path_to_data* - test data used in infer.py
 
@@ -36,3 +42,11 @@ infer - run inferenc on test folder with subfolders = classes
 export - after training is done, you can get weights in other formats
 
 cnn_visualize - creates a heatmap visualisation based on last conv layer gradients
+
+
+### Created output
+Best model is being saved during the training process to `output/models/exp_name_date`, same for exported models.
+
+Flag `debug_img_processing` saves preprocessed (including augmentations) images to `output/debug_img_processing` as they are fed to the model (except for normalization).
+
+Script `cnn_visualize` saves heatmap visualisation of last conv layer grads for `output/visualized`

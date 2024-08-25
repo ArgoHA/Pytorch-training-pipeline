@@ -115,7 +115,7 @@ def vis_gradcam(model, folder_to_run, output_path, target_layer, device):
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
     folder_to_run = Path(cfg.export.path_to_data)
-    output_path = Path(cfg.export.vis_path)
+    output_path = Path(cfg.train.vis_path)
     model = prepare_model(
         Path(cfg.train.path_to_save) / "model.pt",
         num_labels,

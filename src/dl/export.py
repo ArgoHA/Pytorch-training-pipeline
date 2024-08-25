@@ -122,7 +122,7 @@ def main(cfg: DictConfig) -> None:
 
     export_to_openvino(model, ov_path)
     export_to_onnx(model, onnx_path, x_test, cfg.export.max_batch_size)
-    export_to_tensorrt(onnx_path, trt_path, cfg.export.trt_half, cfg.export.max_batch_size)
+    export_to_tensorrt(onnx_path, trt_path, cfg.export.half, cfg.export.max_batch_size)
     export_to_tf(onnx_path, tf_path)
     export_to_tflite(tf_path, tflite_path)
 
