@@ -89,7 +89,7 @@ class CustomDataset(Dataset):
         image_path, label = self.split.iloc[idx]
 
         image = Image.open(self.root_path / image_path)
-        # image.draft("RGB", self.img_size)
+        image.draft("RGB", self.img_size) # speeds up loading
         image = ImageOps.exif_transpose(image)  # fix rotation
         image = self.transform(image)
 
