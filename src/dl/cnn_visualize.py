@@ -121,7 +121,7 @@ def main(cfg: DictConfig) -> None:
         num_labels,
         cfg.train.device,
     ).to("cpu")
-    target_layer = model.features[8][0]
+    target_layer = model.features[8][0] # last conv layer
 
     vis_gradcam(model, folder_to_run, output_path, target_layer, "cpu")
 
