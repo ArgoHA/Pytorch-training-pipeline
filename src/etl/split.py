@@ -6,6 +6,7 @@ import loguru
 import numpy as np
 from omegaconf import DictConfig
 from sklearn.model_selection import train_test_split
+
 from src.ptypes import class_names
 
 
@@ -41,19 +42,23 @@ def split(
     val_split: float,
     image_paths: List[Path],
     labels: List[int],
+    seed: int,
 ) -> None:
     test_split = 1 - train_split - val_split
     if test_split <= 0.001:
         test_split = 0
 
     indices = np.arange(len(image_paths))
-    train_idxs, temp_idxs = train_test_split(indices, test_size=(1 - train_split), stratify=labels)
+    train_idxs, temp_idxs = train_test_split(
+        indices, test_size=(1 - train_split), stratify=labels, random_state=seed
+    )
 
     if test_split:
         test_idxs, val_idxs = train_test_split(
             temp_idxs,
             test_size=(val_split / (val_split + test_split)),
             stratify=[labels[i] for i in temp_idxs],
+            random_state=seed,
         )
     else:
         val_idxs = temp_idxs
@@ -75,7 +80,9 @@ def main(cfg: DictConfig) -> None:
     data_path = Path(cfg.train.data_path)
 
     image_paths, labels, _ = get_stats(data_path)
-    split(data_path, cfg.train.train_split, cfg.train.val_split, image_paths, labels)
+    split(
+        data_path, cfg.train.train_split, cfg.train.val_split, image_paths, labels, cfg.train.seed
+    )
 
 
 if __name__ == "__main__":
