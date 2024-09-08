@@ -66,7 +66,7 @@ class CustomDataset(Dataset):
                 ]
             )
 
-    def _convert_rgb(self, x: torch.Tensor) -> torch.Tensor:
+    def _convert_rgb(self, x: Image) -> Image:
         return x.convert("RGB")
 
     def _save_transformed_images(
@@ -89,7 +89,7 @@ class CustomDataset(Dataset):
         image_path, label = self.split.iloc[idx]
 
         image = Image.open(self.root_path / image_path)
-        image.draft("RGB", self.img_size) # speeds up loading
+        image.draft("RGB", self.img_size)  # speeds up loading
         image = ImageOps.exif_transpose(image)  # fix rotation
         image = self.transform(image)
 
