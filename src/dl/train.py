@@ -366,7 +366,6 @@ def main(cfg: DictConfig) -> None:
     train_loader, val_loader, test_loader = base_loader.build_dataloaders()
 
     model = build_model(base_loader.num_classes, cfg.device, cfg.layers_to_train)
-    torch.compile(model)
 
     loss = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
