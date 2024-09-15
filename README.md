@@ -21,6 +21,7 @@ python -m src.etl.preprocess   # Converts images and PDFs to JPG format
 python -m src.etl.split        # Creates train, validation, and test CSVs with image paths
 python -m src.dl.train         # Runs the training pipeline
 python -m src.dl.export        # Exports weights in various formats after training
+python -m src.dl.bench         # Runs all exported models on the test set
 python -m src.dl.infer         # Runs inference on a test folder with subfolders as classes
 python -m src.dl.cnn_visualize # Creates a heatmap visualization based on the last convolutional layer gradients (Grad-CAM)
 ```
