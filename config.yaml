@@ -27,7 +27,7 @@ train:
   vis_path: ${train.root}/output/visualized
 
   seed: 42
-  cudnn_fixed: False
+  cudnn_fixed: True
   debug_img_processing: False
 
 
