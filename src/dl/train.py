@@ -11,7 +11,8 @@ from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image, ImageOps
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from torch import nn
+from torch import autocast, nn
+from torch.amp import GradScaler
 from torch.optim.lr_scheduler import CyclicLR
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
@@ -203,7 +204,7 @@ def build_model(n_outputs: int, device: str, layers_to_train: int) -> nn.Module:
 
 def prepare_model(model_path: Path, num_classes: int, device: str) -> nn.Module:
     model = build_model(num_classes, device, layers_to_train=-1)
-    checkpoint = torch.load(model_path, map_location=torch.device("cpu"))
+    checkpoint = torch.load(model_path, map_location=torch.device("cpu"), weights_only=True)
     model.load_state_dict(checkpoint)
     model.to(device)
     model.eval()
@@ -307,6 +308,8 @@ def train(
 ) -> None:
     best_metric = 0
     wandb.watch(model, log_freq=100)
+    scaler = GradScaler()
+
     for epoch in range(1, epochs + 1):
         model.train()
 
@@ -317,11 +320,13 @@ def train(
 
                 optimizer.zero_grad()
 
-                output = model(inputs)
-                loss = loss_func(output, labels)
+                with autocast(device_type=device, dtype=torch.float16):
+                    output = model(inputs)
+                    loss = loss_func(output, labels)
 
-                loss.backward()
-                optimizer.step()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
 
                 tepoch.set_postfix(loss=loss.item())
 
