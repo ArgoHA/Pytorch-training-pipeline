@@ -20,14 +20,17 @@ OUTPUT_NAME = "output"
 
 def load_model(model_path: Path, num_classes: int, device: str) -> nn.Module:
     model = build_model(n_outputs=num_classes, device=device, layers_to_train=-1)
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, weights_only=True))
     model.eval()
     return model
 
 
 def export_to_onnx(
-    model: nn.Module, onnx_path: Path, x_test: torch.Tensor, max_batch_size: int
+    model: nn.Module, onnx_path: Path, x_test: torch.Tensor, max_batch_size: int, half: bool
 ) -> None:
+    if half:
+        model = model.half()
+        x_test = x_test.half()
     if max_batch_size > 1:
         dynamic_axes = {"input": {0: "batch_size"}, "output": {0: "batch_size"}}
     else:
@@ -37,16 +40,15 @@ def export_to_onnx(
         x_test,
         onnx_path,
         opset_version=12,
-        input_names=[INPUT_NAME],
-        output_names=[OUTPUT_NAME],
+        input_names=["input"],
+        output_names=["output"],
         dynamic_axes=dynamic_axes,
     )
 
 
-def export_to_openvino(model: nn.Module, ov_path: Path) -> None:
-    core = ov.Core()
-    ov_model = ov.convert_model(model)
-    ov.save_model(ov_model, ov_path)
+def export_to_openvino(onnx_path: Path, ov_path: Path) -> None:
+    model = ov.convert_model(input_model=str(onnx_path))
+    ov.serialize(model, str(ov_path.with_suffix(".xml")), str(ov_path.with_suffix(".bin")))
 
 
 def export_to_tensorrt(
@@ -87,20 +89,20 @@ def export_to_tensorrt(
         f.write(engine)
 
 
-def export_to_tf(onnx_path: Path, tf_path: str) -> None:
-    onnx_model = onnx.load(onnx_path)
+def export_to_tf(onnx_model_path: Path, tf_path: str) -> None:
+    onnx_model = onnx.load(onnx_model_path)
     tf_rep = prepare(onnx_model)
     tf_rep.export_graph(tf_path)
 
 
-def export_to_tflite(
-    tf_path: Path,
-    tflite_path: str,
-) -> None:
-    converter = tf.lite.TFLiteConverter.from_saved_model(tf_path)
+def export_to_tflite(tf_path: Path, tflite_path: str, half: bool) -> None:
+    converter = tf.lite.TFLiteConverter.from_saved_model(str(tf_path))
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    tflite_model = converter.convert()
 
+    if half:
+        converter.target_spec.supported_types = [tf.float16]
+
+    tflite_model = converter.convert()
     with open(tflite_path, "wb") as f:
         f.write(tflite_model)
 
@@ -113,18 +115,18 @@ def main(cfg: DictConfig) -> None:
     trt_path = model_path.parent / "model.engine"
     onnx_path = model_path.parent / "model.onnx"
     ov_path = model_path.parent / "model.xml"
-    tf_path = str(model_path.parent / "model.pb")
+    tf_path = model_path.parent / "tf"
     tflite_path = str(model_path.parent / "model.tflite")
 
     model = load_model(model_path, num_classes, cfg.train.device)
 
     x_test = torch.randn(1, 3, *cfg.train.img_size, requires_grad=True).to(cfg.train.device)
 
-    export_to_openvino(model, ov_path)
-    export_to_onnx(model, onnx_path, x_test, cfg.export.max_batch_size)
+    export_to_onnx(model, onnx_path, x_test, cfg.export.max_batch_size, cfg.export.half)
+    export_to_openvino(onnx_path, ov_path)
     export_to_tensorrt(onnx_path, trt_path, cfg.export.half, cfg.export.max_batch_size)
-    export_to_tf(onnx_path, tf_path)
-    export_to_tflite(tf_path, tflite_path)
+    # export_to_tf(onnx_path, str(tf_path))
+    # export_to_tflite(tf_path, tflite_path, cfg.export.half)
 
 
 if __name__ == "__main__":

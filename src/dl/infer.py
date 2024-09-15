@@ -6,30 +6,34 @@ from typing import Dict, List
 import hydra
 from omegaconf import DictConfig
 from PIL import Image
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from tqdm import tqdm
 
-from src.dl.prod_infer import CustomModel
-from src.ptypes import name_to_label_mapping
+from src.infer.torch_model import Torch_model
+from src.ptypes import img_size, label_to_name_mapping, name_to_label_mapping
+
+THRESHOLD = 0.7
 
 
 def run_prod_infer(model_path: Path, path_to_data: Path) -> List[int]:
     preds = []
     img_paths = [x for x in Path(path_to_data).glob("*.jpg")]
 
-    model = CustomModel(model_path / "model.pt")
+    model = Torch_model(model_path / "model.pt", label_to_name_mapping, *img_size)
 
     output_path = Path("output") / "results" / path_to_data.name
     output_path.mkdir(exist_ok=True, parents=True)
 
     for img_path in tqdm(img_paths):
         img = Image.open(img_path)
-        # img.draft("RGB", img_size)
-        res = model.process(img)
+        img.draft("RGB", img_size)
+        res = model(img)
+        if res[1] <= THRESHOLD and name_to_label_mapping[res[0]]:
+            res = (label_to_name_mapping[0], 1 - res[1])
         preds.append(name_to_label_mapping[res[0]])
         # copy_needed_class_for_new_dataset(img_path, res[0])
 
-    print(f"{path_to_data}: {preds.count(0), preds.count(1), preds.count(2)}/{len(preds)}")
+    print(f"{path_to_data}: {preds.count(0), preds.count(1)}/{len(preds)}")
     return preds
 
 
@@ -49,13 +53,15 @@ def compute_metrics(
         all_preds.extend(preds)
         all_true.extend([gt_val[folder_name]] * len(preds))
 
-    precision = precision_score(all_true, all_preds, average="macro")
-    recall = recall_score(all_true, all_preds, average="macro")
-    f1 = f1_score(all_true, all_preds, average="macro")
+    precision = precision_score(all_true, all_preds, average="binary")
+    recall = recall_score(all_true, all_preds, average="binary")
+    f1 = f1_score(all_true, all_preds, average="binary")
+    accuracy = accuracy_score(all_true, all_preds)
 
     print(f"F1-Score: {round(f1, 3)}")
     print(f"Precision: {round(precision, 3)}")
     print(f"Recall: {round(recall, 3)}")
+    print(f"Accuracy: {round(accuracy, 3)}")
 
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
