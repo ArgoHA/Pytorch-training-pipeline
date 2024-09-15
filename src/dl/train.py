@@ -188,12 +188,8 @@ class Loader:
 
 
 def build_model(n_outputs: int, device: str, layers_to_train: int) -> nn.Module:
-    model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
-    model.classifier = nn.Sequential(
-        nn.Dropout(p=0.3),
-        nn.Linear(in_features=1280, out_features=n_outputs),
-    )
-
+    model = models.shufflenet_v2_x1_5(weights=models.ShuffleNet_V2_X1_5_Weights.DEFAULT)
+    model.fc = nn.Linear(in_features=1024, out_features=n_outputs)
     if layers_to_train == -1:
         return model.to(device)
     for param in list(model.parameters())[:-layers_to_train]:
