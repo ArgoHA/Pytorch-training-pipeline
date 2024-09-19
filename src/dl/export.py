@@ -91,14 +91,13 @@ def export_to_tensorrt(
 
 def export_to_tf(onnx_model_path: Path, tf_path: str) -> None:
     onnx_model = onnx.load(onnx_model_path)
-    tf_rep = prepare(onnx_model)
+    tf_rep = prepare(onnx_model, auto_cast=True)
     tf_rep.export_graph(tf_path)
 
 
 def export_to_tflite(tf_path: Path, tflite_path: str, half: bool) -> None:
     converter = tf.lite.TFLiteConverter.from_saved_model(str(tf_path))
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
-
     if half:
         converter.target_spec.supported_types = [tf.float16]
 
@@ -116,7 +115,7 @@ def main(cfg: DictConfig) -> None:
     onnx_path = model_path.parent / "model.onnx"
     ov_path = model_path.parent / "model.xml"
     tf_path = model_path.parent / "tf"
-    tflite_path = str(model_path.parent / "model.tflite")
+    tflite_path = model_path.parent / "model.tflite"
 
     model = load_model(model_path, num_classes, cfg.train.device)
 
