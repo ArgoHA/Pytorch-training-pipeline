@@ -4,6 +4,7 @@ from typing import Dict, Tuple
 
 import cv2
 import numpy as np
+import pandas as pd
 import torch
 import wandb
 from matplotlib import pyplot as plt
@@ -62,6 +63,22 @@ def wandb_logger(loss, metrics: Dict[str, float], mode: str) -> None:
     wandb.log({f"{mode}/loss/": loss})
     for metric_name, metric_value in metrics.items():
         wandb.log({f"{mode}/metrics/{metric_name}": metric_value})
+
+
+def log_metrics_locally(all_metrics: Dict[str, Dict[str, float]], path_to_save: Path) -> None:
+    metrics_df = pd.DataFrame.from_dict(all_metrics, orient="index")
+    metrics_df = metrics_df.round(4)
+    if path_to_save:
+        metrics_df.to_csv(path_to_save / "metrics.csv")
+    print(metrics_df, "\n")
+
+
+def save_metrics(train_metrics, metrics, loss, path_to_save) -> None:
+    log_metrics_locally(
+        all_metrics={"train": train_metrics, "val": metrics}, path_to_save=path_to_save
+    )
+    wandb_logger(loss, train_metrics, mode="train")
+    wandb_logger(None, metrics, mode="val")
 
 
 from torch.optim.lr_scheduler import _LRScheduler

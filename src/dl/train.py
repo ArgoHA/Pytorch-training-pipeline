@@ -21,16 +21,19 @@ from tqdm import tqdm
 from src.dl.utils import (
     RandomRotation90,
     build_precision_recall_threshold_curves,
+    log_metrics_locally,
+    save_metrics,
     set_seeds,
     wandb_logger,
 )
-from src.ptypes import class_names, img_norms, label_to_name_mapping
+from src.ptypes import class_names, img_norms, label_to_name_mapping, num_labels
 
 
 class CustomDataset(Dataset):
     def __init__(
         self,
         img_size: Tuple[int, int],
+        img_draft: bool,
         root_path: Path,
         split: pd.DataFrame,
         debug_img_processing: bool,
@@ -39,6 +42,7 @@ class CustomDataset(Dataset):
         self.root_path = root_path
         self.split = split
         self.img_size = img_size
+        self.img_draft = img_draft
         self.norm = img_norms
         self.debug_img_processing = debug_img_processing
         self._init_augs(train_mode)
@@ -89,7 +93,8 @@ class CustomDataset(Dataset):
         image_path, label = self.split.iloc[idx]
 
         image = Image.open(self.root_path / image_path)
-        image.draft("RGB", self.img_size)  # speeds up loading
+        if self.img_draft:
+            image.draft("RGB", self.img_size)  # speeds up loading
         image = ImageOps.exif_transpose(image)  # fix rotation
         image = self.transform(image)
 
@@ -106,12 +111,14 @@ class Loader:
         self,
         root_path: Path,
         img_size: Tuple[int, int],
+        img_draft: bool,
         batch_size: int,
         num_workers: int,
         debug_img_processing: bool = False,
     ) -> None:
         self.root_path = root_path
         self.img_size = img_size
+        self.img_draft = img_draft
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.debug_img_processing = debug_img_processing
@@ -144,13 +151,12 @@ class Loader:
             num_workers=self.num_workers,
             shuffle=shuffle,
         )
-        dataloader.num_classes = self.num_classes
-        dataloader.class_names = self.class_names
         return dataloader
 
     def build_dataloaders(self) -> Tuple[DataLoader, DataLoader, DataLoader]:
         train_ds = CustomDataset(
             self.img_size,
+            self.img_draft,
             self.root_path,
             self.splits["train"],
             self.debug_img_processing,
@@ -158,6 +164,7 @@ class Loader:
         )
         val_ds = CustomDataset(
             self.img_size,
+            self.img_draft,
             self.root_path,
             self.splits["val"],
             self.debug_img_processing,
@@ -172,6 +179,7 @@ class Loader:
         if len(self.splits["test"]):
             test_ds = CustomDataset(
                 self.img_size,
+                self.img_draft,
                 self.root_path,
                 self.splits["test"],
                 self.debug_img_processing,
@@ -237,14 +245,14 @@ def evaluate(
     probs, gt_labels = get_full_preds(model, test_loader, device)
 
     if path_to_save is not None:
-        for class_idx in range(test_loader.num_classes):
+        for class_idx in range(num_labels):
             output_path = path_to_save / "pr_curves"
             output_path.mkdir(exist_ok=True)
 
             build_precision_recall_threshold_curves(
                 gt_labels,
                 probs[:, class_idx],
-                output_path / f"{mode}_pr_curve_class_{test_loader.class_names[class_idx]}.png",
+                output_path / f"{mode}_pr_curve_class_{class_names[class_idx]}.png",
                 class_idx,
             )
 
@@ -272,22 +280,6 @@ def get_full_preds(
     val_probs = torch.cat(val_probs, dim=0)
     val_labels = torch.tensor(val_labels)
     return val_probs, val_labels
-
-
-def log_metrics_locally(all_metrics: Dict[str, Dict[str, float]], path_to_save: Path) -> None:
-    metrics_df = pd.DataFrame.from_dict(all_metrics, orient="index")
-    metrics_df = metrics_df.round(4)
-    if path_to_save:
-        metrics_df.to_csv(path_to_save / "metrics.csv")
-    print(metrics_df, "\n")
-
-
-def save_metrics(train_metrics, metrics, loss, path_to_save) -> None:
-    log_metrics_locally(
-        all_metrics={"train": train_metrics, "val": metrics}, path_to_save=path_to_save
-    )
-    wandb_logger(loss, train_metrics, mode="train")
-    wandb_logger(None, metrics, mode="val")
 
 
 def train(
@@ -359,23 +351,24 @@ def main(cfg: DictConfig) -> None:
     base_loader = Loader(
         root_path=Path(cfg.data_path),
         img_size=tuple(cfg.img_size),
+        img_draft=cfg.img_draft,
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
         debug_img_processing=cfg.debug_img_processing,
     )
     train_loader, val_loader, test_loader = base_loader.build_dataloaders()
 
-    model = build_model(base_loader.num_classes, cfg.device, cfg.layers_to_train)
+    model = build_model(num_labels, cfg.device, cfg.layers_to_train)
 
-    loss = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
+    loss = nn.CrossEntropyLoss(label_smoothing=cfg.label_smoothing)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.base_lr, weight_decay=cfg.weight_decay)
 
     scheduler = None
     if cfg["use_scheduler"]:
         scheduler = CyclicLR(
             optimizer,
-            base_lr=0.0001,
-            max_lr=0.001,
+            base_lr=cfg.base_lr,
+            max_lr=cfg.base_lr * 10,
             step_size_up=cfg["epochs"] // 4,
             step_size_down=cfg["epochs"] // 2 - cfg["epochs"] % 4,
             cycle_momentum=False,
@@ -402,7 +395,7 @@ def main(cfg: DictConfig) -> None:
         logger.info("Evaluating best model...")
         model = prepare_model(
             model_path=Path(cfg.path_to_save) / "model.pt",
-            num_classes=base_loader.num_classes,
+            num_classes=num_labels,
             device=cfg.device,
         )
 
