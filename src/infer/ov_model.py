@@ -1,30 +1,28 @@
 from typing import Dict, Tuple
 
+import cv2
 import numpy as np
 import torch
 from numpy.typing import NDArray
 from openvino.runtime import Core
-from PIL import Image
 
 
 class OV_model:
     def __init__(
         self,
         model_path: str,
-        label_to_name: Dict[int, str],
-        input_width: int = 256,
-        input_height: int = 256,
+        n_outputs: int,
+        input_size: Tuple[int, int] = (256, 256),  # (h, w)
         half: bool = False,
     ):
         self.mean_norm = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         self.std_norm = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        self.input_size = (input_width, input_height)
-        self.label_to_name = label_to_name
-        self.n_outputs = len(label_to_name)
+        self.input_size = input_size
+        self.n_outputs = n_outputs
         self.model_path = model_path
         self.half = half
-        self._init_params()
 
+        self._init_params()
         self._load_model()
         self._test_pred()
 
@@ -54,22 +52,21 @@ class OV_model:
         result = self.model(input_blob)
         return result[self.model.output(0)]
 
-    def _preprocess(self, image: Image) -> NDArray:
-        image = image.resize(self.input_size)
-        image = image.convert("RGB")
-        image = np.array(image)
-        image = (image / 255.0).astype(np.float32)
-        image = (image - self.mean_norm) / self.std_norm
-        image = np.transpose(image, (2, 0, 1))
-        return image[None]
+    def _preprocess(self, image: np.ndarray) -> np.ndarray:
+        img = cv2.resize(image, (self.input_size[1], self.input_size[0]), cv2.INTER_LINEAR)
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, then HWC to CHW
+        img = np.ascontiguousarray(img, dtype=self.np_dtype)
+        img = (img / 255.0).astype(self.np_dtype)
+        img = (img - self.mean_norm[:, None, None]) / self.std_norm[:, None, None]
+        return img[None]
 
     def _postprocess(self, logits: torch.Tensor) -> Tuple[str, float]:
         probs = torch.softmax(logits, dim=1).cpu().detach().numpy()  # can do fully on np
-        class_name = self.label_to_name[int(np.argmax(probs))]
-        return class_name, np.max(probs)
+        label = int(np.argmax(probs))
+        return label, np.max(probs)
 
-    def __call__(self, image: Image) -> Tuple[str, float, dict]:
+    def __call__(self, image: np.ndarray) -> Tuple[str, float, dict]:
         image = self._preprocess(image)
         logits = self._predict(image)
-        class_name, max_prob = self._postprocess(torch.from_numpy(logits))
-        return class_name, max_prob
+        label, max_prob = self._postprocess(torch.from_numpy(logits))
+        return label, max_prob

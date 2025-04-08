@@ -1,31 +1,36 @@
 from typing import Dict, Tuple
 
+import cv2
 import numpy as np
 import pycuda.autoinit  # Initializes the CUDA driver
 import pycuda.driver as cuda
 import tensorrt as trt
-from PIL import Image
 
 
 class TensorRT_model:
     def __init__(
         self,
         model_path: str,
-        label_to_name: Dict[int, str],
-        input_width: int = 256,
-        input_height: int = 256,
+        n_outputs: int,
+        input_size: Tuple[int, int] = (256, 256),  # (h, w)
         half: bool = False,
     ):
         self.mean_norm = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         self.std_norm = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        self.input_size = (input_width, input_height)
-        self.label_to_name = label_to_name
-        self.n_outputs = len(label_to_name)
+        self.input_size = input_size
+        self.n_outputs = n_outputs
         self.model_path = model_path
         self.half = half  # Add half precision support
         self._load_engine()
         self._allocate_buffers()
         self.context = self.engine.create_execution_context()
+        self._init_params()
+
+    def _init_params(self) -> None:
+        if self.half:
+            self.np_dtype = np.float16
+        else:
+            self.np_dtype = np.float32
 
     def _load_engine(self):
         TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
@@ -72,16 +77,13 @@ class TensorRT_model:
                     }
                 )
 
-    def _preprocess(self, image: Image) -> np.ndarray:
-        image = image.resize(self.input_size)
-        image = image.convert("RGB")
-        image = np.array(image).astype(np.float32) / 255.0
-        image = (image - self.mean_norm) / self.std_norm
-        image = np.transpose(image, (2, 0, 1))  # HWC to CHW
-        image = np.expand_dims(image, axis=0)  # Add batch dimension
-        if self.half:
-            image = image.astype(np.float16)
-        return image
+    def _preprocess(self, image: np.ndarray) -> np.ndarray:
+        img = cv2.resize(image, (self.input_size[1], self.input_size[0]), cv2.INTER_LINEAR)
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, then HWC to CHW
+        img = np.ascontiguousarray(img, dtype=self.np_dtype)
+        img = (img / 255.0).astype(self.np_dtype)
+        img = (img - self.mean_norm[:, None, None]) / self.std_norm[:, None, None]
+        return img[None]
 
     def _postprocess(self, outputs: np.ndarray) -> Tuple[str, float]:
         outputs = outputs.squeeze()  # Shape becomes (n_outputs,)
@@ -89,12 +91,11 @@ class TensorRT_model:
         if outputs.dtype == np.float16:
             outputs = outputs.astype(np.float32)
         probs = np.exp(outputs) / np.sum(np.exp(outputs))
-        class_idx = int(np.argmax(probs))
-        class_name = self.label_to_name[class_idx]
-        max_prob = float(probs[class_idx])
-        return class_name, max_prob
+        label = int(np.argmax(probs))
+        max_prob = float(probs[label])
+        return label, max_prob
 
-    def __call__(self, image: Image) -> Tuple[str, float]:
+    def __call__(self, image: np.ndarray) -> Tuple[str, float]:
         # Preprocess the image
         input_data = self._preprocess(image)
         # Copy input data to host input buffer
@@ -111,5 +112,5 @@ class TensorRT_model:
         output_data = self.outputs[0]["host"]
         output_shape = self.outputs[0]["shape"]
         output_data = output_data.reshape(output_shape)
-        class_name, max_prob = self._postprocess(output_data)
-        return class_name, max_prob
+        label, max_prob = self._postprocess(output_data)
+        return label, max_prob

@@ -3,14 +3,12 @@
 This is an example of a PyTorch training pipeline that includes configurations with Hydra, tracking with WandB, and export options to ONNX, TensorRT, OpenVino, TensorFlow, and TensorFlow Lite.
 
 ## Configuration
+- **model_name** - Model name from timm
+- **root** - Path to the directory where you store your dataset and where model outputs will be saved
+- **data_path** - Path to the dataset filder. Should contain subfolders with label names
+- **label_to_name**: Class names corresponding to your dataset's folder names.
 - **project_name**: Name used in WandB.
 - **exp**: Experiment name used across the repository for paths in training, exporting, and inference.
-- **root**: Name of your local repository.
-- **label_to_name**: Class names corresponding to your dataset's folder names.
-- **use_scheduler**: Enables CyclicLR with two cycles per full training session.
-- **layers_to_train**: Number of layers from the last one that require gradient computation (`-1` means no frozen layers).
-- **cudnn_fixed**: Ensures reproducibility but can affect performance.
-- **export.path_to_data**: Path to test data used in `infer.py`.
 
 For model architecture, refer to [Torchvision](https://pytorch.org/vision/0.9/models.html) or [Hugging Face's timm](https://huggingface.co/timm).
 
@@ -26,7 +24,14 @@ python -m src.dl.infer         # Runs inference on a test folder with subfolders
 python -m src.dl.cnn_visualize # Creates a heatmap visualization based on the last convolutional layer gradients (Grad-CAM)
 ```
 
+## Inference
+Use inference classes in `src/infer`. Currently available:
+- Torch
+- TensorRT
+- OpenVINO
+
 ## Outputs
 - **Best model**: Saved during the training process at `output/models/exp_name_date`.
-- **Debug images**: Preprocessed images (including augmentations) are saved at `output/debug_img_processing` as they are fed into the model (except for normalization).
+- **Debug images**: Preprocessed images (including augmentations) are saved at `output/debug_images` as they are fed into the model (except for normalization).
+- **Evaluation predicts**: Visualised model's predictions on val set. Includes GT as green and preds as blue.
 - **Visualizations**: `cnn_visualize` script saves heatmap visualizations of the last convolutional layer gradients at `output/visualized`.

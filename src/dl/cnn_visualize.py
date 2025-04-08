@@ -1,29 +1,31 @@
 from pathlib import Path
 
+import cv2
 import hydra
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
 from omegaconf import DictConfig
-from PIL import Image, ImageOps
-from torchvision import transforms
+from PIL import Image
 from tqdm import tqdm
 
 from src.dl.train import prepare_model
 from src.ptypes import img_norms, img_size, num_labels
 
 
-def get_transforms(img: Image) -> torch.Tensor:
-    transform = transforms.Compose(
-        [
-            transforms.Resize(img_size),
-            transforms.Lambda(lambda x: x.convert("RGB")),
-            transforms.ToTensor(),
-            transforms.Normalize(*img_norms),
-        ]
-    )
-    return transform(img)
+def img_preprocess(image: np.ndarray, device) -> torch.Tensor:
+    mean_norm = np.array(img_norms[0], dtype=np.float32)
+    std_norm = np.array(img_norms[1], dtype=np.float32)
+
+    img = cv2.resize(image, (img_size[1], img_size[0]), cv2.INTER_LINEAR)
+    img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, then HWC to CHW
+    img = np.ascontiguousarray(img, dtype=np.float32)
+    img /= 255.0
+    img = (img - mean_norm[:, None, None]) / std_norm[:, None, None]
+    img = img[None]  # batch dim
+    img = torch.from_numpy(img)
+    return img.to(device)
 
 
 def compute_gradcam(model, target_layer, img, target_class=None):
@@ -68,7 +70,6 @@ def compute_gradcam(model, target_layer, img, target_class=None):
     # Remove the hooks after use
     handle_forward.remove()
     handle_backward.remove()
-
     return heatmap
 
 
@@ -102,11 +103,10 @@ def vis_gradcam(model, folder_to_run, output_path, target_layer, device):
 
             for img_path in tqdm(img_paths):
                 if img_path.is_file():
-                    img_pil = Image.open(img_path)
-                    img_pil = ImageOps.exif_transpose(img_pil)
-
-                    img_tensor = get_transforms(img_pil).unsqueeze(0).to(device)
+                    img = cv2.imread(str(img_path))
+                    img_tensor = img_preprocess(img, device)
                     img_tensor.requires_grad_()
+                    img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
                     heatmap = compute_gradcam(model, target_layer, img_tensor)
                     vis_heatmap(img_pil, heatmap, output_class_path / f"{img_path.stem}.png")
@@ -114,14 +114,15 @@ def vis_gradcam(model, folder_to_run, output_path, target_layer, device):
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
-    folder_to_run = Path(cfg.export.path_to_data)
-    output_path = Path(cfg.train.vis_path)
+    folder_to_run = Path(cfg.train.path_to_test_data)
+    output_path = Path(cfg.train.visualized_path)
     model = prepare_model(
+        cfg.model_name,
         Path(cfg.train.path_to_save) / "model.pt",
         num_labels,
         cfg.train.device,
     ).to("cpu")
-    target_layer = model.features[8][0] # last conv layer
+    target_layer = model.conv_head  # last conv layer
 
     vis_gradcam(model, folder_to_run, output_path, target_layer, "cpu")
 

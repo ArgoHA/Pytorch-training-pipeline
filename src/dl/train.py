@@ -1,203 +1,42 @@
+import math
+import time
+from copy import deepcopy
 from pathlib import Path
+from shutil import rmtree
 from typing import Dict, List, Tuple
 
 import hydra
 import numpy as np
-import pandas as pd
 import timm
 import torch
 import wandb
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
-from PIL import Image, ImageOps
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from torch import autocast, nn
-from torch.amp import GradScaler
-from torch.optim.lr_scheduler import CyclicLR
-from torch.utils.data import DataLoader, Dataset
-from torchvision import models, transforms
+from torch.amp import GradScaler, autocast
+from torch.optim.lr_scheduler import OneCycleLR
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from src.dl.dataset import Loader
 from src.dl.utils import (
-    RandomRotation90,
     build_precision_recall_threshold_curves,
+    calculate_remaining_time,
+    get_vram_usage,
     log_metrics_locally,
     save_metrics,
     set_seeds,
+    visualize,
     wandb_logger,
 )
-from src.ptypes import class_names, img_norms, label_to_name_mapping, num_labels
+from src.ptypes import class_names, num_labels
 
 
-class CustomDataset(Dataset):
-    def __init__(
-        self,
-        img_size: Tuple[int, int],
-        img_draft: bool,
-        root_path: Path,
-        split: pd.DataFrame,
-        debug_img_processing: bool,
-        train_mode: bool,
-    ) -> None:
-        self.root_path = root_path
-        self.split = split
-        self.img_size = img_size
-        self.img_draft = img_draft
-        self.norm = img_norms
-        self.debug_img_processing = debug_img_processing
-        self._init_augs(train_mode)
-
-    def _init_augs(self, train_mode: bool) -> None:
-        if train_mode:
-            self.transform = transforms.Compose(
-                [
-                    transforms.Resize(self.img_size, transforms.InterpolationMode.BICUBIC),
-                    transforms.Lambda(self._convert_rgb),
-                    RandomRotation90(p=0.2),
-                    transforms.RandomHorizontalFlip(p=0.1),
-                    transforms.RandomVerticalFlip(p=0.1),
-                    transforms.ToTensor(),
-                    transforms.Normalize(*self.norm),
-                ]
-            )
-        else:
-            self.transform = transforms.Compose(
-                [
-                    transforms.Resize(self.img_size, transforms.InterpolationMode.BICUBIC),
-                    transforms.Lambda(self._convert_rgb),
-                    transforms.ToTensor(),
-                    transforms.Normalize(*self.norm),
-                ]
-            )
-
-    def _convert_rgb(self, x: Image) -> Image:
-        return x.convert("RGB")
-
-    def _save_transformed_images(
-        self, image: torch.Tensor, idx: int, label: int, image_path: str
-    ) -> None:
-        def unnormalize(tensor: torch.Tensor):
-            for t, m, s in zip(tensor, self.norm[0], self.norm[1]):
-                t.mul_(s).add_(m)
-            return tensor
-
-        save_path = self.root_path.parent / "output" / "debug_img_processing"
-        save_path.mkdir(exist_ok=True, parents=True)
-
-        unnorm_img_tensor = unnormalize(image.clone())
-        transforms.ToPILImage()(unnorm_img_tensor).save(
-            save_path / f"{Path(image_path).stem}_{idx}_{label}.jpg"
-        )
-
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
-        image_path, label = self.split.iloc[idx]
-
-        image = Image.open(self.root_path / image_path)
-        if self.img_draft:
-            image.draft("RGB", self.img_size)  # speeds up loading
-        image = ImageOps.exif_transpose(image)  # fix rotation
-        image = self.transform(image)
-
-        if self.debug_img_processing:
-            self._save_transformed_images(image, idx, label, image_path)
-        return image, label
-
-    def __len__(self) -> int:
-        return len(self.split)
-
-
-class Loader:
-    def __init__(
-        self,
-        root_path: Path,
-        img_size: Tuple[int, int],
-        img_draft: bool,
-        batch_size: int,
-        num_workers: int,
-        debug_img_processing: bool = False,
-    ) -> None:
-        self.root_path = root_path
-        self.img_size = img_size
-        self.img_draft = img_draft
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.debug_img_processing = debug_img_processing
-        self._get_splits()
-        self.class_names = class_names
-        self.print_class_distribution()
-
-    def _get_splits(self) -> None:
-        self.splits = {"train": None, "val": None, "test": None}
-        for split_name in self.splits.keys():
-            if (self.root_path / f"{split_name}.csv").exists():
-                self.splits[split_name] = pd.read_csv(
-                    self.root_path / f"{split_name}.csv", header=None
-                )
-            else:
-                self.splits[split_name] = []
-
-    def print_class_distribution(self) -> None:
-        all_data = pd.concat([split for split in self.splits.values() if np.any(split)])
-        class_counts = all_data[1].value_counts().sort_index()
-        class_distribution = {}
-        for class_id, count in class_counts.items():
-            class_distribution[label_to_name_mapping[class_id]] = count
-        logger.info(", ".join(f"{key}: {value}" for key, value in class_distribution.items()))
-
-    def _build_dataloader_impl(self, dataset: Dataset, shuffle: bool = False) -> DataLoader:
-        dataloader = DataLoader(
-            dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            shuffle=shuffle,
-        )
-        return dataloader
-
-    def build_dataloaders(self) -> Tuple[DataLoader, DataLoader, DataLoader]:
-        train_ds = CustomDataset(
-            self.img_size,
-            self.img_draft,
-            self.root_path,
-            self.splits["train"],
-            self.debug_img_processing,
-            train_mode=True,
-        )
-        val_ds = CustomDataset(
-            self.img_size,
-            self.img_draft,
-            self.root_path,
-            self.splits["val"],
-            self.debug_img_processing,
-            train_mode=False,
-        )
-
-        train_loader = self._build_dataloader_impl(train_ds, shuffle=True)
-        val_loader = self._build_dataloader_impl(val_ds)
-
-        test_loader = None
-        test_ds = []
-        if len(self.splits["test"]):
-            test_ds = CustomDataset(
-                self.img_size,
-                self.img_draft,
-                self.root_path,
-                self.splits["test"],
-                self.debug_img_processing,
-                train_mode=False,
-            )
-            test_loader = self._build_dataloader_impl(test_ds)
-
-        logger.info(f"train: {len(train_ds)}, val: {len(val_ds)}, test: {len(test_ds)}")
-        return train_loader, val_loader, test_loader
-
-    @property
-    def num_classes(self) -> int:
-        return len(self.class_names)
-
-
-def build_model(n_outputs: int, device: str, layers_to_train: int) -> nn.Module:
-    model = models.shufflenet_v2_x1_5(weights=models.ShuffleNet_V2_X1_5_Weights.DEFAULT)
-    model.fc = nn.Linear(in_features=1024, out_features=n_outputs)
+def build_model(
+    model_name: str, pretrained: bool, num_labels: int, device: str, layers_to_train: int
+) -> nn.Module:
+    model = timm.create_model(model_name, pretrained=pretrained, num_classes=num_labels)
     if layers_to_train == -1:
         return model.to(device)
     for param in list(model.parameters())[:-layers_to_train]:
@@ -205,8 +44,14 @@ def build_model(n_outputs: int, device: str, layers_to_train: int) -> nn.Module:
     return model.to(device)
 
 
-def prepare_model(model_path: Path, num_classes: int, device: str) -> nn.Module:
-    model = build_model(num_classes, device, layers_to_train=-1)
+def prepare_model(model_name: str, model_path: Path, num_labels: int, device: str) -> nn.Module:
+    model = build_model(
+        model_name=model_name,
+        num_labels=num_labels,
+        pretrained=False,
+        device=device,
+        layers_to_train=-1,
+    )
     checkpoint = torch.load(model_path, map_location=torch.device("cpu"), weights_only=True)
     model.load_state_dict(checkpoint)
     model.to(device)
@@ -214,214 +59,358 @@ def prepare_model(model_path: Path, num_classes: int, device: str) -> nn.Module:
     return model
 
 
-def get_metrics(gt_labels: List[int], preds: List[int]) -> Dict[str, float]:
-    num_classes = len(set(gt_labels))
-    if num_classes == 2:
-        average = "binary"
-    else:
-        average = "macro"
+class ModelEMA:
+    def __init__(self, student, ema_momentum):
+        self.model = deepcopy(student).eval()
+        for param in self.model.parameters():
+            param.requires_grad_(False)
+        self.ema_scheduler = lambda x: ema_momentum * (1 - math.exp(-x / 2000))
 
-    metrics = {}
-    metrics["accuracy"] = accuracy_score(gt_labels, preds)
-    metrics["f1"] = f1_score(gt_labels, preds, average=average)
-    metrics["precision"] = precision_score(gt_labels, preds, average=average)
-    metrics["recall"] = recall_score(gt_labels, preds, average=average)
-    return metrics
-
-
-def postprocess(probs: torch.Tensor, gt_labels: torch.Tensor) -> Tuple[List[int], List[int]]:
-    preds = torch.argmax(probs, dim=1).tolist()
-    gt_labels = gt_labels.tolist()
-    return preds, gt_labels
+    def update(self, iters, student):
+        student = student.state_dict()
+        with torch.no_grad():
+            momentum = self.ema_scheduler(iters)
+            for name, param in self.model.state_dict().items():
+                if param.dtype.is_floating_point:
+                    param *= momentum
+                    param += (1.0 - momentum) * student[name].detach()
 
 
-def evaluate(
-    test_loader: DataLoader,
-    model: nn.Module,
-    device: str,
-    path_to_save: Path,
-    mode: str,
-) -> Dict[str, float]:
-    probs, gt_labels = get_full_preds(model, test_loader, device)
+class Trainer:
+    def __init__(self, cfg: DictConfig) -> None:
+        self.cfg = cfg
+        self.device = cfg.train.device
+        self.epochs = cfg.train.epochs
+        self.path_to_save = Path(cfg.train.path_to_save)
+        self.to_visualize_eval = cfg.train.to_visualize_eval
+        self.amp_enabled = cfg.train.amp_enabled
+        self.clip_max_norm = cfg.train.clip_max_norm
+        self.b_accum_steps = max(cfg.train.b_accum_steps, 1)
+        self.early_stopping = cfg.train.early_stopping
+        self.use_wandb = cfg.train.use_wandb
 
-    if path_to_save is not None:
-        for class_idx in range(num_labels):
-            output_path = path_to_save / "pr_curves"
-            output_path.mkdir(exist_ok=True)
+        self.debug_img_path = Path(self.cfg.train.debug_img_path)
+        self.eval_preds_path = Path(self.cfg.train.eval_preds_path)
+        self.init_dirs()
 
-            build_precision_recall_threshold_curves(
-                gt_labels,
-                probs[:, class_idx],
-                output_path / f"{mode}_pr_curve_class_{class_names[class_idx]}.png",
-                class_idx,
+        if self.use_wandb:
+            wandb.init(
+                project=cfg.project_name,
+                name=cfg.exp,
+                config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),
             )
 
-    preds, gt_labels = postprocess(probs, gt_labels)
-    metrics = get_metrics(gt_labels, preds)
-    return metrics
+        log_file = Path(cfg.train.path_to_save) / "train_log.txt"
+        log_file.unlink(missing_ok=True)
+        logger.add(log_file, format="{message}", level="INFO", rotation="10 MB")
 
+        set_seeds(cfg.train.seed, cfg.train.cudnn_fixed)
 
-def get_full_preds(
-    model: nn.Module, val_loader: DataLoader, device: str
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    val_probs = []  # List to store predicted probabilities for all classes
-    val_labels = []
-    model.eval()
+        base_loader = Loader(
+            root_path=Path(cfg.train.data_path),
+            img_size=tuple(cfg.train.img_size),
+            batch_size=cfg.train.batch_size,
+            num_workers=cfg.train.num_workers,
+            cfg=cfg,
+            debug_img_processing=cfg.train.debug_img_processing,
+        )
+        self.train_loader, self.val_loader, self.test_loader = base_loader.build_dataloaders()
 
-    with torch.no_grad():
-        for inputs, labels in val_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            logits = model.forward(inputs)
-            probs = torch.softmax(logits, dim=1)
+        self.model = build_model(
+            model_name=cfg.model_name,
+            num_labels=num_labels,
+            pretrained=cfg.train.pretrained,
+            device=self.device,
+            layers_to_train=cfg.train.layers_to_train,
+        )
 
-            val_probs.append(probs)
-            val_labels.extend(labels)
+        self.ema_model = None
+        if self.cfg.train.use_ema:
+            logger.info("EMA model will be evaluated and saved")
+            self.ema_model = ModelEMA(self.model, cfg.train.ema_momentum)
 
-    val_probs = torch.cat(val_probs, dim=0)
-    val_labels = torch.tensor(val_labels)
-    return val_probs, val_labels
+        self.loss_fn = nn.CrossEntropyLoss(label_smoothing=cfg.train.label_smoothing)
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=cfg.train.base_lr, weight_decay=cfg.train.weight_decay
+        )
 
+        self.scheduler = OneCycleLR(
+            self.optimizer,
+            max_lr=cfg.train.base_lr * 10,
+            epochs=cfg.train.epochs,
+            steps_per_epoch=len(self.train_loader) // self.b_accum_steps,
+            pct_start=cfg.train.cycler_pct_start,
+            cycle_momentum=False,
+        )
 
-def train(
-    train_loader: DataLoader,
-    val_loader: DataLoader,
-    device: str,
-    model: nn.Module,
-    loss_func: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler,
-    epochs: int,
-    path_to_save: Path,
-) -> None:
-    best_metric = 0
-    wandb.watch(model, log_freq=100)
-    scaler = GradScaler()
+        if self.amp_enabled:
+            self.scaler = GradScaler()
 
-    for epoch in range(1, epochs + 1):
-        model.train()
+        if self.use_wandb:
+            wandb.watch(self.model)
 
-        with tqdm(train_loader, unit="batch") as tepoch:
-            for inputs, labels in tepoch:
+    def init_dirs(self):
+        for path in [self.debug_img_path, self.eval_preds_path]:
+            if path.exists():
+                rmtree(path)
+            path.mkdir(exist_ok=True, parents=True)
+
+    @staticmethod
+    def get_metrics(gt_labels: List[int], preds: List[int]) -> Dict[str, float]:
+        num_labels = len(set(gt_labels))
+        if num_labels == 2:
+            average = "binary"
+        else:
+            average = "macro"
+
+        metrics = {}
+        metrics["accuracy"] = accuracy_score(gt_labels, preds)
+        metrics["f1"] = f1_score(gt_labels, preds, average=average)
+        metrics["precision"] = precision_score(gt_labels, preds, average=average)
+        metrics["recall"] = recall_score(gt_labels, preds, average=average)
+        return metrics
+
+    def postprocess(
+        self, probs: torch.Tensor, gt_labels: torch.Tensor
+    ) -> Tuple[List[int], List[int]]:
+        preds = torch.argmax(probs, dim=1).tolist()
+        gt_labels = gt_labels.tolist()
+        return preds, gt_labels
+
+    def evaluate(
+        self,
+        test_loader: DataLoader,
+        model: nn.Module,
+        device: str,
+        path_to_save: Path,
+        mode: str,
+    ) -> Dict[str, float]:
+        probs, gt_labels = self.get_full_preds(model, test_loader, device)
+
+        if path_to_save is not None:
+            for class_idx in range(num_labels):
+                output_path = path_to_save / "pr_curves"
+                output_path.mkdir(exist_ok=True)
+
+                build_precision_recall_threshold_curves(
+                    gt_labels,
+                    probs[:, class_idx],
+                    output_path / f"{mode}_pr_curve_class_{class_names[class_idx]}.png",
+                    class_idx,
+                )
+
+        preds, gt_labels = self.postprocess(probs, gt_labels)
+        metrics = self.get_metrics(gt_labels, preds)
+        return metrics
+
+    def get_full_preds(
+        self, model: nn.Module, val_loader: DataLoader, device: str
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        val_probs = []  # List to store predicted probabilities for all classes
+        val_labels = []
+        model.eval()
+
+        with torch.no_grad():
+            for idx, (inputs, labels, img_paths) in enumerate(val_loader):
                 inputs, labels = inputs.to(device), labels.to(device)
-                tepoch.set_description(f"Epoch {epoch}/{epochs}")
+                logits = model.forward(inputs)
+                probs = torch.softmax(logits, dim=1)
 
-                optimizer.zero_grad()
+                val_probs.append(probs)
+                val_labels.extend(labels)
 
-                with autocast(device_type=device, dtype=torch.float16):
-                    output = model(inputs)
-                    loss = loss_func(output, labels)
+                if self.to_visualize_eval and idx <= 1:
+                    visualize(
+                        img_paths,
+                        labels,
+                        probs,
+                        dataset_path=Path(self.cfg.train.data_path),
+                        path_to_save=self.eval_preds_path,
+                    )
 
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+        val_probs = torch.cat(val_probs, dim=0)
+        val_labels = torch.tensor(val_labels)
+        return val_probs, val_labels
 
-                tepoch.set_postfix(loss=loss.item())
+    def save_model(self, metrics, best_metric):
+        model_to_save = self.model
+        if self.ema_model:
+            model_to_save = self.ema_model.model
 
-        train_metrics = evaluate(
-            test_loader=train_loader, model=model, device=device, path_to_save=None, mode="train"
-        )
-        metrics = evaluate(
-            test_loader=val_loader, model=model, device=device, path_to_save=None, mode="val"
-        )
+        self.path_to_save.mkdir(parents=True, exist_ok=True)
+        torch.save(model_to_save.state_dict(), self.path_to_save / "last.pt")
 
-        if scheduler:
-            wandb.log({"lr": optimizer.param_groups[0]["lr"]})
-            scheduler.step()
+        decision_metric = metrics["f1"]
+        if decision_metric > best_metric:
+            best_metric = decision_metric
+            logger.info("Saving new best model🔥")
+            torch.save(model_to_save.state_dict(), self.path_to_save / "model.pt")
+            self.early_stopping_steps = 0
+        else:
+            self.early_stopping_steps += 1
+        return best_metric
 
-        if metrics["f1"] > best_metric:
-            best_metric = metrics["f1"]
+    def train(self) -> None:
+        best_metric = 0
+        cur_iter = 0
+        ema_iter = 0
+        self.early_stopping_steps = 0
+        one_epoch_time = None
 
-            logger.info("Saving new best model...")
-            path_to_save.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(model.state_dict(), path_to_save)
+        def optimizer_step(step_scheduler: bool):
+            """
+            Clip grads, optimizer step, scheduler step, zero grad, EMA model update
+            """
+            nonlocal ema_iter
+            if self.amp_enabled:
+                if self.clip_max_norm:
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_max_norm)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
 
-        save_metrics(train_metrics, metrics, loss, path_to_save=None)
+            else:
+                if self.clip_max_norm:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_max_norm)
+                self.optimizer.step()
+
+            if step_scheduler:
+                self.scheduler.step()
+            self.optimizer.zero_grad()
+
+            if self.ema_model:
+                ema_iter += 1
+                self.ema_model.update(ema_iter, self.model)
+
+        for epoch in range(1, self.epochs + 1):
+            epoch_start_time = time.time()
+            self.model.train()
+            losses = []
+
+            with tqdm(self.train_loader, unit="batch") as tepoch:
+                for batch_idx, (inputs, labels, _) in enumerate(tepoch):
+                    tepoch.set_description(f"Epoch {epoch}/{self.epochs}")
+                    if inputs is None:
+                        continue
+                    cur_iter += 1
+
+                    inputs, labels = inputs.to(self.device), labels.to(self.device)
+
+                    lr = self.optimizer.param_groups[0]["lr"]
+
+                    if self.amp_enabled:
+                        with autocast(device_type=self.device, dtype=torch.float16):
+                            output = self.model(inputs)
+                            loss = self.loss_fn(output, labels)
+                        self.scaler.scale(loss).backward()
+
+                    else:
+                        output = self.model(inputs)
+                        loss = self.loss_fn(output, labels)
+                        loss.backward()
+
+                    if (batch_idx + 1) % self.b_accum_steps == 0:
+                        optimizer_step(step_scheduler=True)
+
+                    losses.append(loss.item())
+
+                    tepoch.set_postfix(
+                        loss=np.mean(losses) * self.b_accum_steps,
+                        eta=calculate_remaining_time(
+                            one_epoch_time,
+                            epoch_start_time,
+                            epoch,
+                            self.epochs,
+                            cur_iter,
+                            len(self.train_loader),
+                        ),
+                        vram=f"{get_vram_usage()}%",
+                    )
+
+            # Final update for any leftover gradients from an incomplete accumulation step
+            if (batch_idx + 1) % self.b_accum_steps != 0:
+                optimizer_step(step_scheduler=False)
+
+            if self.use_wandb:
+                wandb.log({"lr": lr, "epoch": epoch})
+
+            metrics = self.evaluate(
+                test_loader=self.val_loader,
+                model=self.model,
+                device=self.device,
+                path_to_save=None,
+                mode="val",
+            )
+
+            best_metric = self.save_model(metrics, best_metric)
+            save_metrics(
+                {},
+                metrics,
+                np.mean(losses) * self.b_accum_steps,
+                epoch,
+                path_to_save=None,
+                use_wandb=self.use_wandb,
+            )
+
+            one_epoch_time = time.time() - epoch_start_time
+
+            if self.early_stopping and self.early_stopping_steps >= self.early_stopping:
+                logger.info("Early stopping")
+                break
 
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
-    set_seeds(cfg.train.seed, cfg.train.cudnn_fixed)
-    wandb.init(
-        project=cfg.project_name,
-        name=cfg.exp,
-        config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),
-    )
-    cfg = cfg.train
-
-    base_loader = Loader(
-        root_path=Path(cfg.data_path),
-        img_size=tuple(cfg.img_size),
-        img_draft=cfg.img_draft,
-        batch_size=cfg.batch_size,
-        num_workers=cfg.num_workers,
-        debug_img_processing=cfg.debug_img_processing,
-    )
-    train_loader, val_loader, test_loader = base_loader.build_dataloaders()
-
-    model = build_model(num_labels, cfg.device, cfg.layers_to_train)
-
-    loss = nn.CrossEntropyLoss(label_smoothing=cfg.label_smoothing)
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.base_lr, weight_decay=cfg.weight_decay)
-
-    scheduler = None
-    if cfg["use_scheduler"]:
-        scheduler = CyclicLR(
-            optimizer,
-            base_lr=cfg.base_lr,
-            max_lr=cfg.base_lr * 10,
-            step_size_up=cfg["epochs"] // 4,
-            step_size_down=cfg["epochs"] // 2 - cfg["epochs"] % 4,
-            cycle_momentum=False,
-        )
+    trainer = Trainer(cfg)
+    trainer.train()
 
     try:
-        train(
-            train_loader=train_loader,
-            val_loader=val_loader,
-            device=cfg.device,
-            model=model,
-            loss_func=loss,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epochs=cfg.epochs,
-            path_to_save=Path(cfg.path_to_save) / "model.pt",
-        )
-
+        t_start = time.time()
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        logger.warning("Interrupted by user")
     except Exception as e:
         logger.error(e)
     finally:
         logger.info("Evaluating best model...")
         model = prepare_model(
-            model_path=Path(cfg.path_to_save) / "model.pt",
-            num_classes=num_labels,
-            device=cfg.device,
+            model_name=cfg.model_name,
+            model_path=Path(cfg.train.path_to_save) / "model.pt",
+            num_labels=num_labels,
+            device=cfg.train.device,
         )
+        if trainer.ema_model:
+            trainer.ema_model.model = model
+        else:
+            trainer.model = model
 
-        val_metrics = evaluate(
-            test_loader=val_loader,
+        val_metrics = trainer.evaluate(
+            test_loader=trainer.val_loader,
             model=model,
-            device=cfg.device,
-            path_to_save=Path(cfg.path_to_save),
+            device=cfg.train.device,
+            path_to_save=Path(cfg.train.path_to_save),
             mode="val",
         )
+        if cfg.train.use_wandb:
+            wandb_logger(None, val_metrics, epoch=cfg.train.epochs + 1, mode="val")
 
         test_metrics = {}
-        if test_loader:
-            test_metrics = evaluate(
-                test_loader=test_loader,
+        if trainer.test_loader:
+            test_metrics = trainer.evaluate(
+                test_loader=trainer.test_loader,
                 model=model,
-                device=cfg.device,
-                path_to_save=Path(cfg.path_to_save),
+                device=cfg.train.device,
+                path_to_save=Path(cfg.train.path_to_save),
                 mode="test",
             )
-            wandb_logger(None, test_metrics, mode="test")
+            if cfg.train.use_wandb:
+                wandb_logger(None, test_metrics, epoch=-1, mode="test")
 
         log_metrics_locally(
             all_metrics={"val": val_metrics, "test": test_metrics},
-            path_to_save=Path(cfg.path_to_save),
+            path_to_save=Path(cfg.train.path_to_save),
+            epoch=0,
         )
+        logger.info(f"Full training time: {(time.time() - t_start) / 60 / 60:.2f} hours")
 
 
 if __name__ == "__main__":

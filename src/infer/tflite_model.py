@@ -1,28 +1,33 @@
-import time
 from typing import Dict, Tuple
 
+import cv2
 import numpy as np
 import tensorflow as tf
-from PIL import Image
 
 
 class TFLiteModel:
     def __init__(
         self,
         model_path: str,
-        label_to_name: Dict[int, str],
-        input_width: int = 256,
-        input_height: int = 256,
+        n_outputs: int,
+        input_size: Tuple[int, int] = (256, 256),  # (h, w)
     ):
         self.num_threads = 2
         self.mean_norm = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         self.std_norm = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        self.input_size = (input_width, input_height)
-        self.label_to_name = label_to_name
+        self.input_size = input_size
+        self.n_outputs = n_outputs
         self.model_path = model_path
 
+        self._init_params()
         self._load_model()
         self._test_pred()
+
+    def _init_params(self) -> None:
+        if self.half:
+            self.np_dtype = np.float16
+        else:
+            self.np_dtype = np.float32
 
     def _load_model(self):
         # Load the TFLite model, allocate tensors and get input and output details
@@ -48,28 +53,25 @@ class TFLiteModel:
         self.interpreter.invoke()
         return self.interpreter.get_tensor(self.output_details[0]["index"])
 
-    def _preprocess(self, image: Image.Image) -> np.ndarray:
-        image = image.resize((self.input_shape[3], self.input_shape[2]))
-        image = image.convert("RGB")
-        image = np.array(image)
-        image = (image / 255.0).astype(self.input_dtype)
-        image = (image - self.mean_norm) / self.std_norm
-        image = np.transpose(image, (2, 0, 1))  # HWC to CHW
-        input_data = np.expand_dims(image, axis=0)
-        return input_data
+    def _preprocess(self, image: np.ndarray) -> np.ndarray:
+        img = cv2.resize(image, (self.input_size[1], self.input_size[0]), cv2.INTER_LINEAR)  # noqa: F821
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, then HWC to CHW
+        img = np.ascontiguousarray(img, dtype=self.np_dtype)
+        img = (img / 255.0).astype(self.np_dtype)
+        img = (img - self.mean_norm[:, None, None]) / self.std_norm[:, None, None]
+        return img[None]
 
     def _postprocess(self, output_data: np.ndarray) -> Tuple[str, float]:
         if output_data.ndim == 2:
             output_data = output_data[0]
 
         probs = tf.nn.softmax(output_data).numpy()
-        class_id = int(np.argmax(probs))
-        class_name = self.label_to_name[class_id]
+        label = int(np.argmax(probs))
         confidence = float(np.max(probs))
-        return class_name, confidence
+        return label, confidence
 
-    def __call__(self, image: Image.Image) -> Tuple[str, float]:
+    def __call__(self, image: np.ndarray) -> Tuple[str, float]:
         input_data = self._preprocess(image)
         output_data = self._predict(input_data)
-        class_name, confidence = self._postprocess(output_data)
-        return class_name, confidence
+        label, confidence = self._postprocess(output_data)
+        return label, confidence

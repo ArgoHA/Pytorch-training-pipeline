@@ -90,13 +90,14 @@ def convert_images_to_jpg(dir_path: Path, num_threads: int) -> None:
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
-    paths = {"root_path": Path(cfg.train.data_path), "test_path": Path(cfg.export.path_to_data)}
+    paths = {"root_path": Path(cfg.train.data_path), "test_path": Path(cfg.train.path_to_test_data)}
 
     for _, data_path in paths.items():
+        print(data_path)
         if data_path.exists():
             for images_dir in data_path.iterdir():
                 if images_dir.is_dir() and not images_dir.name.startswith("."):
-                    convert_images_to_jpg(images_dir, cfg.train.threads_to_use)
+                    convert_images_to_jpg(images_dir, cfg.train.num_workers)
 
 
 if __name__ == "__main__":

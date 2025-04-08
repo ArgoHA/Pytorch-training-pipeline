@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple
 import hydra
 import loguru
 import numpy as np
+import pandas as pd
 from omegaconf import DictConfig
 from sklearn.model_selection import train_test_split
 
@@ -37,7 +38,7 @@ def get_stats(root_path: Path) -> Tuple[List[Path], List[int], Dict[str, int]]:
 
 
 def split(
-    data_pat: Path,
+    data_path: Path,
     train_split: float,
     val_split: float,
     image_paths: List[Path],
@@ -69,10 +70,14 @@ def split(
         splits["test"] = test_idxs
 
     for split_name, split in splits.items():
-        with open(data_pat / f"{split_name}.csv", "w") as f:
-            for num, idx in enumerate(split):
-                f.write(str(image_paths[idx]) + "," + str(labels[idx]) + "\n")
-            loguru.logger.info(f"{split_name}: {num}")
+        df = pd.DataFrame(
+            {
+                "image_path": [image_paths[idx] for idx in split],
+                "label": [labels[idx] for idx in split],
+            }
+        )
+        df.to_csv(data_path / f"{split_name}.csv", index=False, header=False)
+        loguru.logger.info(f"{split_name}: {df.shape[0]}")
 
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
@@ -81,7 +86,7 @@ def main(cfg: DictConfig) -> None:
 
     image_paths, labels, _ = get_stats(data_path)
     split(
-        data_path, cfg.train.train_split, cfg.train.val_split, image_paths, labels, cfg.train.seed
+        data_path, cfg.split.train_split, cfg.split.val_split, image_paths, labels, cfg.train.seed
     )
 
 

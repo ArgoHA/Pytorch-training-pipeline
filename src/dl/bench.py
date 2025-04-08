@@ -2,16 +2,17 @@ import time
 from pathlib import Path
 from typing import Tuple
 
+import cv2
 import hydra
 import numpy as np
 import pandas as pd
 from loguru import logger
 from omegaconf import DictConfig
-from PIL import Image, ImageOps
+from tabulate import tabulate
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from src.dl.train import get_metrics
+from src.dl.train import Trainer
 from src.infer.ov_model import OV_model
 from src.infer.torch_model import Torch_model
 from src.infer.trt_model import TensorRT_model
@@ -19,15 +20,9 @@ from src.ptypes import img_size, label_to_name_mapping, name_to_label_mapping
 
 
 class CustomDataset(Dataset):
-    def __init__(
-        self,
-        img_size: Tuple[int, int],
-        root_path: Path,
-        split: pd.DataFrame,
-    ) -> None:
+    def __init__(self, root_path: Path, split: pd.DataFrame) -> None:
         self.root_path = root_path
         self.split = split
-        self.img_size = img_size
 
     def __getitem__(self, idx: int) -> Tuple[str, int]:
         image_path, label = self.split.iloc[idx]
@@ -47,21 +42,17 @@ def test_model(test_loader: DataLoader, data_path: Path, model, name: str):
         image_paths, labels = batch
         batch_predictions = []
         for image_path in image_paths:
-            image = Image.open(data_path / image_path)
-            image.draft("RGB", img_size)
-            image = ImageOps.exif_transpose(image)
+            image = cv2.imread(data_path / image_path)
 
             t0 = time.perf_counter()
-            class_name, max_prob = model(image)
+            pred_label, max_prob = model(image)
             latency.append(time.perf_counter() - t0)
-
-            predicted_label = name_to_label_mapping[class_name]
-            batch_predictions.append(predicted_label)
+            batch_predictions.append(pred_label)
 
         predictions.extend(batch_predictions)
         gt_labels.extend(labels.tolist())
 
-    metrics = get_metrics(gt_labels, predictions)
+    metrics = Trainer.get_metrics(gt_labels, predictions)
     metrics["latency"] = np.mean(latency[1:])
     return metrics
 
@@ -71,30 +62,27 @@ def main(cfg: DictConfig):
     data_path = Path(cfg.train.data_path)
 
     torch_model = Torch_model(
-        model_path=str(Path(cfg.export.model_path) / "model.pt"),
-        label_to_name=label_to_name_mapping,
-        input_width=img_size[1],
-        input_height=img_size[0],
+        model_name=cfg.model_name,
+        model_path=str(Path(cfg.train.path_to_save) / "model.pt"),
+        n_outputs=len(label_to_name_mapping),
+        input_size=img_size,
         half=cfg.export.half,
     )
 
     trt_model = TensorRT_model(
-        model_path=str(Path(cfg.export.model_path) / "model.engine"),
-        label_to_name=label_to_name_mapping,
-        input_width=img_size[1],
-        input_height=img_size[0],
+        model_path=str(Path(cfg.train.path_to_save) / "model.engine"),
+        n_outputs=len(label_to_name_mapping),
+        input_size=img_size,
         half=cfg.export.half,
     )
     ov_model = OV_model(
-        model_path=str(Path(cfg.export.model_path) / "model.xml"),
-        label_to_name=label_to_name_mapping,
-        input_width=img_size[1],
-        input_height=img_size[0],
+        model_path=str(Path(cfg.train.path_to_save) / "model.xml"),
+        n_outputs=len(label_to_name_mapping),
+        input_size=img_size,
         half=cfg.export.half,
     )
 
     test_dataset = CustomDataset(
-        img_size=img_size,
         root_path=data_path,
         split=pd.read_csv(data_path / "test.csv", header=None),
     )
@@ -115,7 +103,10 @@ def main(cfg: DictConfig):
         all_metrics[model_name] = test_model(test_loader, data_path, model, model_name)
 
     metrics_df = pd.DataFrame.from_dict(all_metrics, orient="index")
-    print(metrics_df)
+    tabulated_data = tabulate(
+        metrics_df.round(4), headers="keys", tablefmt="pretty", showindex=True
+    )
+    print("\n" + tabulated_data)
 
 
 if __name__ == "__main__":
