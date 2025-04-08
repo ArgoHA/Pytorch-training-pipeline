@@ -4,10 +4,6 @@ import cv2
 import numpy as np
 import timm
 import torch
-from numpy.typing import NDArray
-from PIL import Image
-from torch import nn
-from torchvision import models
 
 
 class Torch_model:
@@ -55,7 +51,7 @@ class Torch_model:
         self.model(torch.from_numpy(img).to(self.device)[None])
 
     def _preprocess(self, image: np.ndarray) -> torch.Tensor:
-        img = cv2.resize(image, (self.input_size[1], self.input_size[0]), cv2.INTER_LINEAR)
+        img = cv2.resize(image, (self.input_size[1], self.input_size[0]), cv2.INTER_AREA)
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, then HWC to CHW
         img = np.ascontiguousarray(img, dtype=self.np_dtype)
         img = (img / 255.0).astype(self.np_dtype)

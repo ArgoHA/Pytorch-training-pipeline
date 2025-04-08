@@ -33,12 +33,13 @@ class CustomDataset(Dataset):
         self.mode = mode
         self.norm = img_norms
         self.debug_img_processing = debug_img_processing
+        self.cases_to_debug = 20
         self._init_augs(cfg)
 
         self.debug_img_path = Path(cfg.train.debug_img_path)
 
     def _init_augs(self, cfg) -> None:
-        resize = [A.Resize(self.target_h, self.target_w)]
+        resize = [A.Resize(self.target_h, self.target_w, interpolation=cv2.INTER_AREA)]
         norm = [
             A.Normalize(mean=self.norm[0], std=self.norm[1]),
             ToTensorV2(),
@@ -99,7 +100,7 @@ class CustomDataset(Dataset):
         image = self.transform(image=image)["image"]
         label = torch.tensor(label, dtype=torch.long)
 
-        if self.debug_img_processing:
+        if self.debug_img_processing and idx <= self.cases_to_debug:
             self._debug_image(image, idx, label, Path(image_path))
         return image, label, image_path
 

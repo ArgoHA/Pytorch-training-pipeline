@@ -54,7 +54,7 @@ class TFLiteModel:
         return self.interpreter.get_tensor(self.output_details[0]["index"])
 
     def _preprocess(self, image: np.ndarray) -> np.ndarray:
-        img = cv2.resize(image, (self.input_size[1], self.input_size[0]), cv2.INTER_LINEAR)  # noqa: F821
+        img = cv2.resize(image, (self.input_size[1], self.input_size[0]), cv2.INTER_AREA)  # noqa: F821
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, then HWC to CHW
         img = np.ascontiguousarray(img, dtype=self.np_dtype)
         img = (img / 255.0).astype(self.np_dtype)
