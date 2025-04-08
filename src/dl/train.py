@@ -362,9 +362,9 @@ class Trainer:
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
     trainer = Trainer(cfg)
-    trainer.train()
 
     try:
+        trainer.train()
         t_start = time.time()
     except KeyboardInterrupt:
         logger.warning("Interrupted by user")
