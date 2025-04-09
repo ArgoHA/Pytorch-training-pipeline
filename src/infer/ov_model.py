@@ -1,10 +1,14 @@
-from typing import Dict, Tuple
+from typing import Tuple
 
 import cv2
 import numpy as np
-import torch
 from numpy.typing import NDArray
 from openvino.runtime import Core
+
+
+def softmax(x: NDArray) -> NDArray:
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
 
 
 class OV_model:
@@ -62,13 +66,13 @@ class OV_model:
         img = (img - self.mean_norm[:, None, None]) / self.std_norm[:, None, None]
         return img[None]
 
-    def _postprocess(self, logits: torch.Tensor) -> Tuple[str, float]:
-        probs = torch.softmax(logits, dim=1).cpu().detach().numpy()  # can do fully on np
+    def _postprocess(self, logits: NDArray) -> Tuple[str, float]:
+        probs = softmax(logits)
         label = int(np.argmax(probs))
         return label, np.max(probs)
 
     def __call__(self, image: np.ndarray) -> Tuple[str, float, dict]:
         image = self._preprocess(image)
         logits = self._predict(image)
-        label, max_prob = self._postprocess(torch.from_numpy(logits))
+        label, max_prob = self._postprocess(logits)
         return label, max_prob
