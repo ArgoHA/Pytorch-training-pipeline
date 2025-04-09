@@ -8,6 +8,8 @@ import cv2
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 from loguru import logger
 from matplotlib import pyplot as plt
@@ -170,3 +172,92 @@ def visualize(img_paths, batch_gt, batch_probs, dataset_path, path_to_save):
         # Construct a filename and save
         outpath = path_to_save / Path(img_path).name
         cv2.imwrite(str(outpath), np.ascontiguousarray(img))
+
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss with optional label smoothing.
+
+    Args:
+        gamma (float): Focusing parameter gamma > 0 (default: 2.0).
+        alpha (float or list or None): Class weighting factor. Can be a scalar
+            (applied uniformly) or a list with length equal to the number of classes.
+            If None, no class weighting is used.
+        label_smoothing (float): Smoothing factor for label smoothing. A value in [0, 1)
+            where 0 means no smoothing (default: 0.0).
+        reduction (str): Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'
+            (default: 'mean').
+    """
+
+    def __init__(self, gamma=2.0, alpha=None, label_smoothing=0.0, reduction="mean"):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.reduction = reduction
+        self.label_smoothing = label_smoothing
+
+        # Process alpha: if provided as a scalar, convert to a tensor; if list, convert to tensor
+        if alpha is not None:
+            if isinstance(alpha, (float, int)):
+                self.alpha = torch.tensor([alpha])
+            elif isinstance(alpha, list):
+                self.alpha = torch.tensor(alpha)
+            else:
+                raise TypeError("Alpha must be a float, int, or list.")
+        else:
+            self.alpha = None
+
+    def forward(self, inputs, targets):
+        """
+        Forward pass.
+
+        Args:
+            inputs (Tensor): Raw logits with shape (batch_size, num_classes).
+            targets (Tensor): Ground truth class indices with shape (batch_size).
+
+        Returns:
+            Tensor: Loss value.
+        """
+        num_classes = inputs.size(1)
+        # Compute log probabilities and probabilities
+        log_probs = F.log_softmax(inputs, dim=1)
+        probs = torch.exp(log_probs)
+
+        # Create one-hot encoding of targets
+        with torch.no_grad():
+            target_one_hot = torch.zeros_like(inputs).scatter(1, targets.unsqueeze(1), 1)
+            if self.label_smoothing > 0:
+                # Apply label smoothing:
+                # For the true class: 1 - label_smoothing
+                # For other classes: label_smoothing divided by (num_classes - 1)
+                smooth_value = self.label_smoothing / (num_classes - 1)
+                target_one_hot = target_one_hot * (1 - self.label_smoothing) + smooth_value
+
+        # Compute the focal weight: (1 - p)^gamma.
+        focal_weight = (1 - probs) ** self.gamma
+
+        # If alpha is provided and is a tensor of length equal to number of classes,
+        # then apply per-class weighting.
+        if self.alpha is not None:
+            if self.alpha.device != inputs.device:
+                self.alpha = self.alpha.to(inputs.device)
+            # If alpha has one element, treat it as a scalar factor.
+            if self.alpha.numel() == 1:
+                alpha_weight = self.alpha
+            elif self.alpha.numel() == num_classes:
+                # Reshape so that it broadcasts with the loss tensor.
+                alpha_weight = self.alpha.view(1, -1)
+            else:
+                raise ValueError("Alpha length must be 1 or equal to number of classes.")
+            focal_weight = alpha_weight * focal_weight
+
+        # Compute the per-sample loss:
+        loss = -target_one_hot * focal_weight * log_probs
+        loss = loss.sum(dim=1)
+
+        # Apply reduction
+        if self.reduction == "mean":
+            return loss.mean()
+        elif self.reduction == "sum":
+            return loss.sum()
+        else:
+            return loss

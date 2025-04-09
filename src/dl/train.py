@@ -21,6 +21,7 @@ from tqdm import tqdm
 
 from src.dl.dataset import Loader
 from src.dl.utils import (
+    FocalLoss,
     build_precision_recall_threshold_curves,
     calculate_remaining_time,
     get_vram_usage,
@@ -130,6 +131,9 @@ class Trainer:
             self.ema_model = ModelEMA(self.model, cfg.train.ema_momentum)
 
         self.loss_fn = nn.CrossEntropyLoss(label_smoothing=cfg.train.label_smoothing)
+        # self.loss_fn = FocalLoss(
+        #     gamma=2.0, alpha=None, label_smoothing=cfg.train.label_smoothing, reduction="mean"
+        # )
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=cfg.train.base_lr, weight_decay=cfg.train.weight_decay
         )
@@ -154,6 +158,10 @@ class Trainer:
             if path.exists():
                 rmtree(path)
             path.mkdir(exist_ok=True, parents=True)
+
+        self.path_to_save.mkdir(exist_ok=True, parents=True)
+        with open(self.path_to_save / "config.yaml", "w") as f:
+            OmegaConf.save(config=self.cfg, f=f)
 
     @staticmethod
     def get_metrics(gt_labels: List[int], preds: List[int]) -> Dict[str, float]:
@@ -364,8 +372,8 @@ def main(cfg: DictConfig) -> None:
     trainer = Trainer(cfg)
 
     try:
-        trainer.train()
         t_start = time.time()
+        trainer.train()
     except KeyboardInterrupt:
         logger.warning("Interrupted by user")
     except Exception as e:
