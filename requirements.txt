@@ -9,8 +9,8 @@ onnxruntime==1.18.0
 onnxruntime-gpu==1.18.0
 onnxsim==0.4.33
 opencv_python==4.7.0.72
-openvino==2024.3.0
-openvino_dev==2024.3.0
+openvino==2024.6.0
+openvino_dev==2024.6.0
 pandas==2.0.3
 Pillow==10.4.0
 pillow_heif==0.18.0
