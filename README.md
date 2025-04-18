@@ -1,6 +1,6 @@
-# Pytorch Training Pipeline
+# Classifier
 
-This is an example of a PyTorch training pipeline that includes configurations with Hydra, tracking with WandB, and export options to ONNX, TensorRT, OpenVino, TensorFlow, and TensorFlow Lite.
+This is an pipeline for training/exporting/inferencing classification models with PyTirch and TIMM. Hydra configs, WandB for experiment tracking, exporting to ONNX, TensorRT, OpenVino, TensorFlow, and TensorFlow Lite.
 
 ## Configuration
 - **model_name** - Model name from timm
