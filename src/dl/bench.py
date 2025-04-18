@@ -46,7 +46,7 @@ def test_model(test_loader: DataLoader, data_path: Path, model, name: str):
 
             t0 = time.perf_counter()
             pred_label, max_prob = model(image)
-            latency.append(time.perf_counter() - t0)
+            latency.append((time.perf_counter() - t0) * 1000)
             batch_predictions.append(pred_label)
 
         predictions.extend(batch_predictions)
