@@ -1,6 +1,6 @@
 # Classifier
 
-This is an pipeline for training/exporting/inferencing classification models with PyTirch and TIMM. Hydra configs, WandB for experiment tracking, exporting to ONNX, TensorRT, OpenVino, TensorFlow, and TensorFlow Lite.
+This is an pipeline for training/exporting/inferencing image classification models with PyTirch and TIMM. Hydra configs, WandB for experiment tracking, exporting to ONNX, TensorRT, OpenVino, TensorFlow, and TensorFlow Lite.
 
 ## Configuration
 - **model_name** - Model name from timm
