@@ -13,7 +13,6 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader, Dataset
 
 from src.dl.utils import seed_worker, vis_one_image
-from src.ptypes import class_names, img_norms, label_to_name_mapping
 
 
 class CustomDataset(Dataset):
@@ -31,8 +30,9 @@ class CustomDataset(Dataset):
         self.split = split
         self.target_h, self.target_w = img_size
         self.mode = mode
-        self.norm = img_norms
+        self.norm = ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         self.debug_img_processing = debug_img_processing
+        self.label_to_name = cfg.train.label_to_name
         self.cases_to_debug = 20
         self._init_augs(cfg)
 
@@ -85,7 +85,7 @@ class CustomDataset(Dataset):
         image_np = np.ascontiguousarray(image_np)
 
         # visualize GT label
-        vis_one_image(image_np, label, mode="gt")
+        vis_one_image(image_np, label, mode="gt", label_to_name=self.label_to_name)
 
         save_dir = self.debug_img_path / self.mode
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -125,7 +125,8 @@ class Loader:
         self.cfg = cfg
         self.debug_img_processing = debug_img_processing
         self._get_splits()
-        self.class_names = class_names
+        self.class_names = list(cfg.train.label_to_name.values())
+        self.label_to_name = cfg.train.label_to_name
         self.multiscale_prob = cfg.train.augs.multiscale_prob
         self.print_class_distribution()
 
@@ -144,7 +145,7 @@ class Loader:
         class_counts = all_data[1].value_counts().sort_index()
         class_distribution = {}
         for class_id, count in class_counts.items():
-            class_distribution[label_to_name_mapping[class_id]] = count
+            class_distribution[self.label_to_name[class_id]] = count
 
     def _build_dataloader_impl(self, dataset: Dataset, shuffle: bool = False) -> DataLoader:
         collate_fn = self.val_collate_fn

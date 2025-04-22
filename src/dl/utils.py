@@ -16,8 +16,6 @@ from matplotlib import pyplot as plt
 from sklearn.metrics import precision_recall_curve
 from tabulate import tabulate
 
-from src.ptypes import label_to_name_mapping
-
 
 def build_precision_recall_threshold_curves(
     gt_labels: torch.Tensor, probs: torch.Tensor, output_path: Path, class_idx: int
@@ -127,7 +125,7 @@ def get_vram_usage():
         return 0
 
 
-def vis_one_image(image: np.ndarray, label: int, mode, score=None) -> None:
+def vis_one_image(image: np.ndarray, label: int, mode, label_to_name, score=None) -> None:
     if mode == "gt":
         prefix = "GT: "
         color = (46, 153, 60)
@@ -141,7 +139,7 @@ def vis_one_image(image: np.ndarray, label: int, mode, score=None) -> None:
 
     cv2.putText(
         image,
-        f"{prefix}{label_to_name_mapping[int(label)]}{postfix}",
+        f"{prefix}{label_to_name[int(label)]}{postfix}",
         position,
         cv2.FONT_HERSHEY_SIMPLEX,
         1,
@@ -151,7 +149,7 @@ def vis_one_image(image: np.ndarray, label: int, mode, score=None) -> None:
     )
 
 
-def visualize(img_paths, batch_gt, batch_probs, dataset_path, path_to_save):
+def visualize(img_paths, batch_gt, batch_probs, dataset_path, path_to_save, label_to_name):
     """
     Saves images with class names.
       - Green text for GT
@@ -166,8 +164,8 @@ def visualize(img_paths, batch_gt, batch_probs, dataset_path, path_to_save):
         label = gt.item()
         score = prob.max().item()
 
-        vis_one_image(img, label, mode="gt")
-        vis_one_image(img, pred, mode="pred", score=score)
+        vis_one_image(img, label, mode="gt", label_to_name=label_to_name)
+        vis_one_image(img, pred, mode="pred", label_to_name=label_to_name, score=score)
 
         # Construct a filename and save
         outpath = path_to_save / Path(img_path).name

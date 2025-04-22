@@ -31,7 +31,6 @@ from src.dl.utils import (
     visualize,
     wandb_logger,
 )
-from src.ptypes import class_names, num_labels
 
 
 def build_model(
@@ -89,6 +88,8 @@ class Trainer:
         self.b_accum_steps = max(cfg.train.b_accum_steps, 1)
         self.early_stopping = cfg.train.early_stopping
         self.use_wandb = cfg.train.use_wandb
+        self.label_to_name = cfg.train.label_to_name
+        self.n_labels = len(self.label_to_name)
 
         self.debug_img_path = Path(self.cfg.train.debug_img_path)
         self.eval_preds_path = Path(self.cfg.train.eval_preds_path)
@@ -119,7 +120,7 @@ class Trainer:
 
         self.model = build_model(
             model_name=cfg.model_name,
-            num_labels=num_labels,
+            num_labels=self.n_labels,
             pretrained=cfg.train.pretrained,
             device=self.device,
             layers_to_train=cfg.train.layers_to_train,
@@ -196,14 +197,14 @@ class Trainer:
         probs, gt_labels = self.get_full_preds(model, test_loader, device)
 
         if path_to_save is not None:
-            for class_idx in range(num_labels):
+            for class_idx in range(self.n_labels):
                 output_path = path_to_save / "pr_curves"
                 output_path.mkdir(exist_ok=True)
 
                 build_precision_recall_threshold_curves(
                     gt_labels,
                     probs[:, class_idx],
-                    output_path / f"{mode}_pr_curve_class_{class_names[class_idx]}.png",
+                    output_path / f"{mode}_pr_curve_class_{self.label_to_name[class_idx]}.png",
                     class_idx,
                 )
 
@@ -234,6 +235,7 @@ class Trainer:
                         probs,
                         dataset_path=Path(self.cfg.train.data_path),
                         path_to_save=self.eval_preds_path,
+                        label_to_name=self.label_to_name,
                     )
 
         val_probs = torch.cat(val_probs, dim=0)
@@ -383,7 +385,7 @@ def main(cfg: DictConfig) -> None:
         model = prepare_model(
             model_name=cfg.model_name,
             model_path=Path(cfg.train.path_to_save) / "model.pt",
-            num_labels=num_labels,
+            num_labels=len(cfg.train.label_to_name),
             device=cfg.train.device,
         )
         if trainer.ema_model:

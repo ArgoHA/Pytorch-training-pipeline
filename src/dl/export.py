@@ -12,7 +12,6 @@ from onnx_tf.backend import prepare
 from torch import nn
 
 from src.dl.train import build_model
-from src.ptypes import class_names
 
 INPUT_NAME = "input"
 OUTPUT_NAME = "output"
@@ -115,7 +114,7 @@ def export_to_tflite(tf_path: Path, tflite_path: str, half: bool) -> None:
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
     model_path = Path(cfg.train.path_to_save) / "model.pt"
-    num_classes = len(class_names)
+    num_classes = len(cfg.train.label_to_name)
 
     trt_path = model_path.parent / "model.engine"
     onnx_path = model_path.parent / "model.onnx"

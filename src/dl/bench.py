@@ -16,7 +16,6 @@ from src.dl.train import Trainer
 from src.infer.ov_model import OV_model
 from src.infer.torch_model import Torch_model
 from src.infer.trt_model import TensorRT_model
-from src.ptypes import label_to_name_mapping
 
 
 class CustomDataset(Dataset):
@@ -64,20 +63,20 @@ def main(cfg: DictConfig):
     torch_model = Torch_model(
         model_name=cfg.model_name,
         model_path=str(Path(cfg.train.path_to_save) / "model.pt"),
-        n_outputs=len(label_to_name_mapping),
+        n_outputs=len(cfg.train.label_to_name),
         input_size=cfg.train.img_size,
         half=cfg.export.half,
     )
 
     trt_model = TensorRT_model(
         model_path=str(Path(cfg.train.path_to_save) / "model.engine"),
-        n_outputs=len(label_to_name_mapping),
+        n_outputs=len(cfg.train.label_to_name),
         input_size=cfg.train.img_size,
         half=cfg.export.half,
     )
     ov_model = OV_model(
         model_path=str(Path(cfg.train.path_to_save) / "model.xml"),
-        n_outputs=len(label_to_name_mapping),
+        n_outputs=len(cfg.train.label_to_name),
         input_size=cfg.train.img_size,
         half=cfg.export.half,
     )

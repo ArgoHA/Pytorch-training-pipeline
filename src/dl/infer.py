@@ -10,7 +10,6 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from tqdm import tqdm
 
 from src.infer.torch_model import Torch_model
-from src.ptypes import img_size, label_to_name_mapping, name_to_label_mapping
 
 THRESHOLD = 0.5
 
@@ -38,12 +37,11 @@ def copy_needed_class_for_new_dataset(img_path, class_name):
 
 
 def compute_metrics(
-    folder_predictions: defaultdict[int, List[int]], gt_val: Dict[str, int]
+    folder_predictions: defaultdict[int, List[int]], gt_val: Dict[str, int], num_labels: int
 ) -> None:
     all_preds = []
     all_gt = []
 
-    num_labels = len(label_to_name_mapping)
     if num_labels == 2:
         average = "binary"
     else:
@@ -70,14 +68,15 @@ def main(cfg: DictConfig) -> None:
     model = Torch_model(
         model_name=cfg.model_name,
         model_path=Path(cfg.train.path_to_save) / "model.pt",
-        n_outputs=len(label_to_name_mapping),
-        input_size=img_size,
+        n_outputs=len(cfg.train.label_to_name),
+        input_size=cfg.train.img_size,
     )
     for folder in Path(cfg.train.path_to_test_data).iterdir():
         if folder.is_dir():
             folder_predictions[folder.name] = run_prod_infer(model=model, path_to_data=folder)
 
-    compute_metrics(folder_predictions, name_to_label_mapping)
+    name_to_label = {v: k for k, v in cfg.train.label_to_name.items()}
+    compute_metrics(folder_predictions, name_to_label, len(cfg.train.label_to_name))
 
 
 if __name__ == "__main__":

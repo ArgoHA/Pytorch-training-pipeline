@@ -8,10 +8,8 @@ import pandas as pd
 from omegaconf import DictConfig
 from sklearn.model_selection import train_test_split
 
-from src.ptypes import class_names
 
-
-def get_stats(root_path: Path) -> Tuple[List[Path], List[int], Dict[str, int]]:
+def get_stats(root_path: Path, class_names) -> Tuple[List[Path], List[int], Dict[str, int]]:
     image_paths = []
     labels = []
     classes = {}
@@ -84,7 +82,7 @@ def split(
 def main(cfg: DictConfig) -> None:
     data_path = Path(cfg.train.data_path)
 
-    image_paths, labels, _ = get_stats(data_path)
+    image_paths, labels, _ = get_stats(data_path, list(cfg.train.label_to_name.values()))
     split(
         data_path, cfg.split.train_split, cfg.split.val_split, image_paths, labels, cfg.train.seed
     )
