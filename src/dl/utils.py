@@ -1,6 +1,7 @@
 import random
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
@@ -259,3 +260,25 @@ class FocalLoss(nn.Module):
             return loss.sum()
         else:
             return loss
+
+
+def get_latest_experiment_name(exp: str, output_dir: str):
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        return exp
+
+    target_exp_name = Path(exp).name.rsplit("_", 1)[0]
+    latest_exp = None
+
+    for exp_path in output_dir.parent.iterdir():
+        exp_name, exp_date = exp_path.name.rsplit("_", 1)
+        if target_exp_name == exp_name:
+            exp_date = datetime.strptime(exp_date, "%Y-%m-%d")
+            if not latest_exp or exp_date > latest_exp:
+                latest_exp = exp_date
+
+            print(target_exp_name, exp_date, latest_exp)
+
+    final_exp_name = f"{target_exp_name}_{latest_exp.strftime('%Y-%m-%d')}"
+    logger.info(f"Latest experiment: {final_exp_name}")
+    return final_exp_name

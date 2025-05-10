@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from src.dl.train import Trainer
+from src.dl.utils import get_latest_experiment_name
 from src.infer.ov_model import OV_model
 from src.infer.torch_model import Torch_model
 from src.infer.trt_model import TensorRT_model
@@ -59,6 +60,7 @@ def test_model(test_loader: DataLoader, data_path: Path, model, name: str):
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig):
     data_path = Path(cfg.train.data_path)
+    cfg.exp = get_latest_experiment_name(cfg.exp, cfg.train.path_to_save)
 
     torch_model = Torch_model(
         model_name=cfg.model_name,

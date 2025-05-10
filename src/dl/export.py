@@ -12,6 +12,7 @@ from onnx_tf.backend import prepare
 from torch import nn
 
 from src.dl.train import build_model
+from src.dl.utils import get_latest_experiment_name
 
 INPUT_NAME = "input"
 OUTPUT_NAME = "output"
@@ -72,7 +73,7 @@ def export_to_tensorrt(
             return
 
     config = builder.create_builder_config()
-    config.max_workspace_size = 1 << 30  # 1GB
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)  # 1GB
     if half:
         config.set_flag(trt.BuilderFlag.FP16)
 
@@ -113,6 +114,7 @@ def export_to_tflite(tf_path: Path, tflite_path: str, half: bool) -> None:
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
+    cfg.exp = get_latest_experiment_name(cfg.exp, cfg.train.path_to_save)
     model_path = Path(cfg.train.path_to_save) / "model.pt"
     num_classes = len(cfg.train.label_to_name)
 

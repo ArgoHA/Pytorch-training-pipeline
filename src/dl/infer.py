@@ -9,6 +9,7 @@ from omegaconf import DictConfig
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from tqdm import tqdm
 
+from src.dl.utils import get_latest_experiment_name
 from src.infer.torch_model import Torch_model
 
 THRESHOLD = 0.5
@@ -64,6 +65,7 @@ def compute_metrics(
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
+    cfg.exp = get_latest_experiment_name(cfg.exp, cfg.train.path_to_save)
     folder_predictions = defaultdict(list)
     model = Torch_model(
         model_name=cfg.model_name,

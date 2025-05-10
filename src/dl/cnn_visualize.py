@@ -11,6 +11,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from src.dl.train import prepare_model
+from src.dl.utils import get_latest_experiment_name
 from src.ptypes import img_norms, img_size, num_labels
 
 
@@ -114,6 +115,7 @@ def vis_gradcam(model, folder_to_run, output_path, target_layer, device):
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
+    cfg.exp = get_latest_experiment_name(cfg.exp, cfg.train.path_to_save)
     folder_to_run = Path(cfg.train.path_to_test_data)
     output_path = Path(cfg.train.visualized_path)
     model = prepare_model(
