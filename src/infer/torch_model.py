@@ -11,7 +11,7 @@ class Torch_model:
         self,
         model_name: str,
         model_path: str,
-        n_outputs: Dict[int, str],
+        n_outputs: int,
         input_size: Tuple[int, int] = (256, 256),  # (h, w)
         half: bool = False,
     ):
@@ -38,7 +38,7 @@ class Torch_model:
         self.model = timm.create_model(
             self.model_name, pretrained=False, num_classes=self.n_outputs
         )
-        checkpoint = torch.load(self.model_path, weights_only=True)
+        checkpoint = torch.load(self.model_path, weights_only=True, map_location="cpu")
         self.model.load_state_dict(checkpoint)
 
         if self.half:

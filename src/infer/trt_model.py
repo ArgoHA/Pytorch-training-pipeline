@@ -22,7 +22,7 @@ class TensorRT_model:
         self.model_path = model_path
         self.half = half  # Add half precision support
         self._load_engine()
-        self._allocate_buffers()
+        self.inputs, self.outputs, self.bindings, self.stream = self._allocate_buffers()
         self.context = self.engine.create_execution_context()
         self._init_params()
 
@@ -38,44 +38,34 @@ class TensorRT_model:
             self.engine = runtime.deserialize_cuda_engine(f.read())
 
     def _allocate_buffers(self):
-        self.inputs = []
-        self.outputs = []
-        self.bindings = [None] * self.engine.num_bindings
-        self.stream = cuda.Stream()
-        for binding in self.engine:
-            binding_idx = self.engine.get_binding_index(binding)
-            shape = self.engine.get_binding_shape(binding)
+        inputs, outputs, bindings = [], [], []
+        stream = cuda.Stream()
+
+        for i in range(self.engine.num_io_tensors):
+            name = self.engine.get_tensor_name(i)
+            shape = tuple(self.engine.get_tensor_shape(name))
             size = trt.volume(shape)
-            # Get the data type from the engine binding
-            dtype = trt.nptype(self.engine.get_binding_dtype(binding))
-            # Adjust dtype for half precision if applicable
+            dtype = trt.nptype(self.engine.get_tensor_dtype(name))
+            # half-precision override
             if self.half and dtype == np.float32:
                 dtype = np.float16
-            # Allocate host and device buffers
+
+            # host + device buffers
             host_mem = cuda.pagelocked_empty(size, dtype)
             device_mem = cuda.mem_alloc(host_mem.nbytes)
-            # Append the device buffer to device bindings at the correct index
-            self.bindings[binding_idx] = int(device_mem)
-            if self.engine.binding_is_input(binding):
+
+            bindings.append(int(device_mem))
+
+            # classify input vs output
+            mode = self.engine.get_tensor_mode(name)
+            if mode == trt.TensorIOMode.INPUT:
                 self.input_shape = shape
-                self.inputs.append(
-                    {
-                        "host": host_mem,
-                        "device": device_mem,
-                        "binding": binding_idx,
-                        "shape": shape,
-                    }
-                )
+                inputs.append({"name": name, "host": host_mem, "device": device_mem})
             else:
                 self.output_shape = shape
-                self.outputs.append(
-                    {
-                        "host": host_mem,
-                        "device": device_mem,
-                        "binding": binding_idx,
-                        "shape": shape,
-                    }
-                )
+                outputs.append({"name": name, "host": host_mem, "device": device_mem})
+
+        return inputs, outputs, bindings, stream
 
     def _preprocess(self, image: np.ndarray) -> np.ndarray:
         img = cv2.resize(
@@ -97,22 +87,27 @@ class TensorRT_model:
         max_prob = float(probs[label])
         return label, max_prob
 
-    def __call__(self, image: np.ndarray) -> Tuple[str, float]:
-        # Preprocess the image
-        input_data = self._preprocess(image)
-        # Copy input data to host input buffer
-        np.copyto(self.inputs[0]["host"], input_data.ravel())
-        # Transfer input data to the GPU.
+    def __call__(self, image: np.ndarray) -> Tuple[int, float]:
+        input_data = self._preprocess(image).ravel()
+
+        # copy to host
+        np.copyto(self.inputs[0]["host"], input_data)
+
+        # host→device
         cuda.memcpy_htod_async(self.inputs[0]["device"], self.inputs[0]["host"], self.stream)
-        # Run inference.
-        self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream.handle)
-        # Transfer predictions back from the GPU.
+
+        # bind addresses by tensor name
+        for idx, addr in enumerate(self.bindings):
+            name = self.engine.get_tensor_name(idx)
+            self.context.set_tensor_address(name, addr)
+
+        # run inference
+        self.context.execute_async_v3(stream_handle=self.stream.handle)
+
+        # device→host
         cuda.memcpy_dtoh_async(self.outputs[0]["host"], self.outputs[0]["device"], self.stream)
-        # Synchronize the stream
         self.stream.synchronize()
-        # Postprocess results
-        output_data = self.outputs[0]["host"]
-        output_shape = self.outputs[0]["shape"]
-        output_data = output_data.reshape(output_shape)
-        label, max_prob = self._postprocess(output_data)
-        return label, max_prob
+
+        # reshape + postprocess
+        out = self.outputs[0]["host"].reshape(self.output_shape)
+        return self._postprocess(out)
