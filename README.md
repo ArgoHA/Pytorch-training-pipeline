@@ -35,3 +35,19 @@ Use inference classes in `src/infer`. Currently available:
 - **Debug images**: Preprocessed images (including augmentations) are saved at `output/debug_images` as they are fed into the model (except for normalization).
 - **Evaluation predicts**: Visualised model's predictions on val set. Includes GT as green and preds as blue.
 - **Visualizations**: `cnn_visualize` script saves heatmap visualizations of the last convolutional layer gradients at `output/visualized`.
+
+
+## Models comparison
+Tested on 13k images dataset `train: 10440, val: 1306, test: 1304`, 4 classes, input size 348. Inferenced on 5070ti without optimisations, pure PyyTorch. F1 score calculated on the test set:
+
+```
+model_name | latency |  F1
+-----------+---------+-------
+efnet_b0   | 6.5ms   | 0.969
+efnet_b1   | 7.6ms   | 0.976
+efnetv2_s  | 9.4ms   | 0.967
+mobnet4s   | 5.6ms   | 0.948
+mobnet4m   | 6.7ms   | 0.970
+mobnet4l   | 7.7ms   | 0.971
+fastvit    | 7.2ms   | 0.973
+```
