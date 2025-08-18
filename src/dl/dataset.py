@@ -47,6 +47,12 @@ class CustomDataset(Dataset):
 
         if self.mode == "train":
             augs = [
+                # A.CoarseDropout(
+                #     num_holes_range=(1, 2),
+                #     hole_height_range=(0.05, 0.15),
+                #     hole_width_range=(0.05, 0.15),
+                #     p=cfg.train.augs.coarse_dropout,
+                # ),
                 A.RandomBrightnessContrast(p=cfg.train.augs.brightness),
                 A.RandomGamma(p=cfg.train.augs.gamma),
                 A.Blur(p=cfg.train.augs.blur),
@@ -59,6 +65,13 @@ class CustomDataset(Dataset):
                 ),
                 A.HorizontalFlip(p=cfg.train.augs.left_right_flip),
                 A.VerticalFlip(p=cfg.train.augs.up_down_flip),
+                A.Rotate(
+                    limit=cfg.train.augs.rotation_degree,
+                    p=cfg.train.augs.rotation_p,
+                    interpolation=cv2.INTER_AREA,
+                    border_mode=cv2.BORDER_CONSTANT,
+                    fill=(114, 114, 114),
+                ),
             ]
 
             self.transform = A.Compose(augs + resize + norm)
@@ -96,6 +109,8 @@ class CustomDataset(Dataset):
         image_path, label = self.split.iloc[idx]
 
         image = cv2.imread(self.root_path / image_path)
+        assert image is not None, f"Image wasn't loaded: {self.root_path / image_path}"
+
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = self.transform(image=image)["image"]
         label = torch.tensor(label, dtype=torch.long)

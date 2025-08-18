@@ -139,6 +139,22 @@ class Trainer:
             self.model.parameters(), lr=cfg.train.base_lr, weight_decay=cfg.train.weight_decay
         )
 
+        # class_weights = None
+        # if cfg.train.class_weights:
+        #     class_weights = torch.tensor(
+        #         cfg.train.class_weights, dtype=torch.float32, device=self.device
+        #     )
+        # self.loss_fn = nn.CrossEntropyLoss(
+        #     label_smoothing=cfg.train.label_smoothing, weight=class_weights
+        # )
+
+        # self.optimizer = torch.optim.Adam(
+        #     self.model.parameters(),
+        #     lr=cfg.train.base_lr,
+        #     weight_decay=cfg.train.weight_decay,
+        #     # betas=cfg.train.betas,
+        # )
+
         self.scheduler = OneCycleLR(
             self.optimizer,
             max_lr=cfg.train.base_lr * 10,
@@ -165,7 +181,9 @@ class Trainer:
             OmegaConf.save(config=self.cfg, f=f)
 
     @staticmethod
-    def get_metrics(gt_labels: List[int], preds: List[int]) -> Dict[str, float]:
+    def get_metrics(
+        gt_labels: List[int], preds: List[int], per_class: bool, label_to_name=None
+    ) -> Dict[str, float]:
         num_labels = len(set(gt_labels))
         if num_labels == 2:
             average = "binary"
@@ -177,7 +195,31 @@ class Trainer:
         metrics["f1"] = f1_score(gt_labels, preds, average=average)
         metrics["precision"] = precision_score(gt_labels, preds, average=average)
         metrics["recall"] = recall_score(gt_labels, preds, average=average)
-        return metrics
+
+        if not per_class or num_labels <= 2:
+            return metrics, None
+
+        per_class_metrics = {}
+        unique_labels = sorted(set(gt_labels))
+        f1s = f1_score(gt_labels, preds, average=None, labels=unique_labels)
+        precisions = precision_score(gt_labels, preds, average=None, labels=unique_labels)
+        recalls = recall_score(gt_labels, preds, average=None, labels=unique_labels)
+        accs = []
+
+        for cl in unique_labels:
+            idx = [i for i, lbl in enumerate(gt_labels) if lbl == cl]
+            acc = sum(1 for i in idx if preds[i] == cl) / len(idx) if idx else 0.0
+            accs.append(acc)
+
+        for i, cl in enumerate(unique_labels):
+            class_name = label_to_name.get(cl, cl) if label_to_name else cl
+            per_class_metrics[class_name] = {
+                "accuracy": accs[i],
+                "f1": f1s[i],
+                "precision": precisions[i],
+                "recall": recalls[i],
+            }
+        return metrics, per_class_metrics
 
     def postprocess(
         self, probs: torch.Tensor, gt_labels: torch.Tensor
@@ -193,6 +235,7 @@ class Trainer:
         device: str,
         path_to_save: Path,
         mode: str,
+        per_class: bool,
     ) -> Dict[str, float]:
         probs, gt_labels = self.get_full_preds(model, test_loader, device)
 
@@ -209,8 +252,10 @@ class Trainer:
                 )
 
         preds, gt_labels = self.postprocess(probs, gt_labels)
-        metrics = self.get_metrics(gt_labels, preds)
-        return metrics
+        metrics, per_class_metrics = self.get_metrics(
+            gt_labels, preds, per_class, self.label_to_name
+        )
+        return metrics, per_class_metrics
 
     def get_full_preds(
         self, model: nn.Module, val_loader: DataLoader, device: str
@@ -344,12 +389,13 @@ class Trainer:
             if self.use_wandb:
                 wandb.log({"lr": lr, "epoch": epoch})
 
-            metrics = self.evaluate(
+            metrics, _ = self.evaluate(
                 test_loader=self.val_loader,
                 model=self.model,
                 device=self.device,
                 path_to_save=None,
                 mode="val",
+                per_class=False,
             )
 
             best_metric = self.save_model(metrics, best_metric)
@@ -393,24 +439,26 @@ def main(cfg: DictConfig) -> None:
         else:
             trainer.model = model
 
-        val_metrics = trainer.evaluate(
+        val_metrics, val_per_class_metrics = trainer.evaluate(
             test_loader=trainer.val_loader,
             model=model,
             device=cfg.train.device,
             path_to_save=Path(cfg.train.path_to_save),
             mode="val",
+            per_class=True,
         )
         if cfg.train.use_wandb:
             wandb_logger(None, val_metrics, epoch=cfg.train.epochs + 1, mode="val")
 
         test_metrics = {}
         if trainer.test_loader:
-            test_metrics = trainer.evaluate(
+            test_metrics, test_per_class_metrics = trainer.evaluate(
                 test_loader=trainer.test_loader,
                 model=model,
                 device=cfg.train.device,
                 path_to_save=Path(cfg.train.path_to_save),
                 mode="test",
+                per_class=True,
             )
             if cfg.train.use_wandb:
                 wandb_logger(None, test_metrics, epoch=-1, mode="test")
@@ -419,6 +467,10 @@ def main(cfg: DictConfig) -> None:
             all_metrics={"val": val_metrics, "test": test_metrics},
             path_to_save=Path(cfg.train.path_to_save),
             epoch=0,
+            per_class={
+                "val": val_per_class_metrics,
+                "test": test_per_class_metrics,
+            },
         )
         logger.info(f"Full training time: {(time.time() - t_start) / 60 / 60:.2f} hours")
 

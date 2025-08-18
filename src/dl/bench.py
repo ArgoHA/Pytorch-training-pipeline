@@ -1,5 +1,6 @@
 import time
 from pathlib import Path
+from shutil import rmtree
 from typing import Tuple
 
 import cv2
@@ -32,7 +33,11 @@ class CustomDataset(Dataset):
         return len(self.split)
 
 
-def test_model(test_loader: DataLoader, data_path: Path, model, name: str):
+def save_errors():
+    pass
+
+
+def test_model(test_loader: DataLoader, data_path: Path, model, name: str, to_save_errors: bool):
     logger.info(f"Testing {name} model")
     predictions = []
     gt_labels = []
@@ -41,7 +46,7 @@ def test_model(test_loader: DataLoader, data_path: Path, model, name: str):
     for batch in tqdm(test_loader, total=len(test_loader)):
         image_paths, labels = batch
         batch_predictions = []
-        for image_path in image_paths:
+        for im_id, image_path in enumerate(image_paths):
             image = cv2.imread(data_path / image_path)
 
             t0 = time.perf_counter()
@@ -49,10 +54,13 @@ def test_model(test_loader: DataLoader, data_path: Path, model, name: str):
             latency.append((time.perf_counter() - t0) * 1000)
             batch_predictions.append(pred_label)
 
+            if to_save_errors and pred_label != labels[im_id]:
+                save_errors()
+
         predictions.extend(batch_predictions)
         gt_labels.extend(labels.tolist())
 
-    metrics = Trainer.get_metrics(gt_labels, predictions)
+    metrics, _ = Trainer.get_metrics(gt_labels, predictions, per_class=False)
     metrics["latency"] = np.mean(latency[1:])
     return metrics
 
@@ -94,6 +102,10 @@ def main(cfg: DictConfig):
         num_workers=cfg.train.num_workers,
     )
 
+    output_path = Path(cfg.train.bench_img_path)
+    if output_path.exists():
+        rmtree(output_path)
+
     all_metrics = {}
     models = {
         "torch": torch_model,
@@ -101,7 +113,9 @@ def main(cfg: DictConfig):
         "OV": ov_model,
     }
     for model_name, model in models.items():
-        all_metrics[model_name] = test_model(test_loader, data_path, model, model_name)
+        all_metrics[model_name] = test_model(
+            test_loader, data_path, model, model_name, to_save_errors=cfg.train.to_save_errors
+        )
 
     metrics_df = pd.DataFrame.from_dict(all_metrics, orient="index")
     tabulated_data = tabulate(

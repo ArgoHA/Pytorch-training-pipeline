@@ -70,7 +70,10 @@ def wandb_logger(loss, metrics: Dict[str, float], epoch, mode: str) -> None:
 
 
 def log_metrics_locally(
-    all_metrics: Dict[str, Dict[str, float]], path_to_save: Path, epoch: int
+    all_metrics: Dict[str, Dict[str, float]],
+    path_to_save: Path,
+    epoch: int,
+    per_class: Dict[str, Dict[str, float]],
 ) -> None:
     metrics_df = pd.DataFrame.from_dict(all_metrics, orient="index")
     metrics_df = metrics_df.round(4)
@@ -85,10 +88,33 @@ def log_metrics_locally(
     if path_to_save:
         metrics_df.to_csv(path_to_save / "metrics.csv")
 
+        rows = []
+        metric_order = ["accuracy", "f1", "precision", "recall"]
+        for split, classes in per_class.items():
+            if classes is None:
+                continue
+            for cls_name, m in classes.items():
+                for met in metric_order:
+                    rows.append(
+                        {
+                            "id": split,
+                            "class": cls_name,
+                            "metric": met,
+                            "value": round(float(m.get(met, float("nan"))), 4),
+                        }
+                    )
+
+        if len(rows) > 0:
+            per_class_df = pd.DataFrame(rows, columns=["id", "class", "metric", "value"])
+            per_class_df.to_csv(path_to_save / "per_class_metrics.csv", index=False)
+
 
 def save_metrics(train_metrics, metrics, loss, epoch, path_to_save, use_wandb) -> None:
     log_metrics_locally(
-        all_metrics={"train": train_metrics, "val": metrics}, path_to_save=path_to_save, epoch=epoch
+        all_metrics={"train": train_metrics, "val": metrics},
+        path_to_save=path_to_save,
+        epoch=epoch,
+        per_class={},
     )
     if use_wandb:
         wandb_logger(loss, train_metrics, epoch, mode="train")
