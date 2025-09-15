@@ -3,8 +3,8 @@ from typing import Tuple
 
 import cv2
 import numpy as np
+import onnxruntime as ort
 from numpy.typing import NDArray
-from openvino import Core
 
 
 def softmax(x: NDArray) -> NDArray:
@@ -12,7 +12,7 @@ def softmax(x: NDArray) -> NDArray:
     return e_x / e_x.sum()
 
 
-class OV_model:
+class ONNX_model:
     def __init__(
         self,
         model_path: str,
@@ -26,6 +26,8 @@ class OV_model:
         self.n_outputs = n_outputs
         self.model_path = model_path
         self.half = half
+        self.device = "cuda" if ort.get_device() == "GPU" else "cpu"
+        print(ort.get_device())
 
         self._init_params()
         self._load_model()
@@ -38,24 +40,22 @@ class OV_model:
             self.np_dtype = np.float32
 
     def _load_model(self):
-        core = Core()
-        det_ov_model = core.read_model(self.model_path)
-
-        self.device_name = "CPU"
-        if "GPU" in core.get_available_devices():
-            self.device_name = "GPU"
-        if self.device_name != "CPU":
-            det_ov_model.reshape({0: [1, 3, *self.input_size]})
-
-        self.model = core.compile_model(det_ov_model, self.device_name)
+        providers = ["CUDAExecutionProvider"] if self.device == "cuda" else ["CPUExecutionProvider"]
+        provider_options = (
+            [{"cudnn_conv_algo_search": "DEFAULT"}] if self.device == "cuda" else [{}]
+        )
+        self.model = ort.InferenceSession(
+            self.model_path, providers=providers, provider_options=provider_options
+        )
 
     def _test_pred(self) -> None:
         input_blob = np.zeros((1, 3, *self.input_size), dtype=self.np_dtype)
         self._predict(input_blob)
 
-    def _predict(self, input_blob: NDArray) -> NDArray:
-        result = self.model(input_blob)
-        return result[self.model.output(0)]
+    def _predict(self, inputs: NDArray) -> NDArray:
+        ort_inputs = {self.model.get_inputs()[0].name: inputs.astype(self.np_dtype)}
+        outs = self.model.run(None, ort_inputs)
+        return outs[0]
 
     def _preprocess(self, image: np.ndarray) -> np.ndarray:
         img = cv2.resize(

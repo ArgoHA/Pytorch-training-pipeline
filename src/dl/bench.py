@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from src.dl.train import Trainer
 from src.dl.utils import get_latest_experiment_name
+from src.infer.onnx_model import ONNX_model
 from src.infer.ov_model import OV_model
 from src.infer.torch_model import Torch_model
 from src.infer.trt_model import TensorRT_model
@@ -91,6 +92,13 @@ def main(cfg: DictConfig):
         half=cfg.export.half,
     )
 
+    onnx_model = ONNX_model(
+        model_path=str(Path(cfg.train.path_to_save) / "model.onnx"),
+        n_outputs=len(cfg.train.label_to_name),
+        input_size=cfg.train.img_size,
+        half=cfg.export.half,
+    )
+
     test_dataset = CustomDataset(
         root_path=data_path,
         split=pd.read_csv(data_path / "test.csv", header=None),
@@ -111,6 +119,7 @@ def main(cfg: DictConfig):
         "torch": torch_model,
         "TensorRT": trt_model,
         "OV": ov_model,
+        "ONNX": onnx_model,
     }
     for model_name, model in models.items():
         all_metrics[model_name] = test_model(
