@@ -69,8 +69,8 @@ class TensorRT_model:
 
     def _preprocess(self, image: np.ndarray) -> np.ndarray:
         img = cv2.resize(
-            image, (self.input_size[0], self.input_size[1]), interpolation=cv2.INTER_AREA
-        )
+            image, (self.input_size[1], self.input_size[0]), interpolation=cv2.INTER_AREA
+        )  # (w, h)
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, then HWC to CHW
         img = np.ascontiguousarray(img, dtype=self.np_dtype)
         img = (img / 255.0).astype(self.np_dtype)
@@ -82,7 +82,7 @@ class TensorRT_model:
         # Convert outputs to float32 if they are in float16
         if outputs.dtype == np.float16:
             outputs = outputs.astype(np.float32)
-        probs = np.exp(outputs) / np.sum(np.exp(outputs))
+        probs = np.exp(outputs) / (np.sum(np.exp(outputs)) + 1e-8)
         label = int(np.argmax(probs))
         max_prob = float(probs[label])
         return label, max_prob
