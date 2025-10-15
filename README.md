@@ -51,3 +51,29 @@ mobnet4m   | 6.7ms   | 0.970
 mobnet4l   | 7.7ms   | 0.971
 fastvit    | 7.2ms   | 0.973
 ```
+
+
+## Integration info example
+Model format: .tflite
+Input size: Height=384, Width=384
+Resize method: INTER_AREA (OpenCV) or equivalent
+Input tensor shape: [Batch Size, Height, Width, Channels]
+Channels order: RGB
+Data type: float32
+
+Preprocessing:
+Read the image (BGR if using OpenCV), then convert to RGB
+Resize to (384, 384) with interpolation method cv2.INTER_AREA
+Convert to float32 and scale to 0–1
+Normalize per channel
+Add batch dimension
+python snippet:
+
+```
+image = cv2.imread("img.jpg")
+image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+image = cv2.resize(image, (384, 384), interpolation=cv2.INTER_AREA)
+image = image.astype(np.float32) / 255.0
+image = (image - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]
+image = np.expand_dims(image, axis=0)
+```

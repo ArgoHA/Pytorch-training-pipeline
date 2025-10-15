@@ -3,12 +3,14 @@ from pathlib import Path
 import hydra
 import onnx
 import openvino as ov
-import tensorflow as tf
+
+# import tensorflow as tf
 import tensorrt as trt
 import torch
 import torch.onnx
 from omegaconf import DictConfig
-from onnx_tf.backend import prepare
+
+# from onnx_tf.backend import prepare
 from torch import nn
 
 from src.dl.train import build_model
@@ -95,21 +97,21 @@ def export_to_tensorrt(
         f.write(engine)
 
 
-def export_to_tf(onnx_model_path: Path, tf_path: str) -> None:
-    onnx_model = onnx.load(onnx_model_path)
-    tf_rep = prepare(onnx_model, auto_cast=True)
-    tf_rep.export_graph(tf_path)
+# def export_to_tf(onnx_model_path: Path, tf_path: str) -> None:
+#     onnx_model = onnx.load(onnx_model_path)
+#     tf_rep = prepare(onnx_model, auto_cast=True)
+#     tf_rep.export_graph(tf_path)
 
 
-def export_to_tflite(tf_path: Path, tflite_path: str, half: bool) -> None:
-    converter = tf.lite.TFLiteConverter.from_saved_model(str(tf_path))
-    converter.optimizations = [tf.lite.Optimize.DEFAULT]
-    if half:
-        converter.target_spec.supported_types = [tf.float16]
+# def export_to_tflite(tf_path: Path, tflite_path: str, half: bool) -> None:
+#     converter = tf.lite.TFLiteConverter.from_saved_model(str(tf_path))
+#     converter.optimizations = [tf.lite.Optimize.DEFAULT]
+#     if half:
+#         converter.target_spec.supported_types = [tf.float16]
 
-    tflite_model = converter.convert()
-    with open(tflite_path, "wb") as f:
-        f.write(tflite_model)
+#     tflite_model = converter.convert()
+#     with open(tflite_path, "wb") as f:
+#         f.write(tflite_model)
 
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
@@ -131,8 +133,8 @@ def main(cfg: DictConfig) -> None:
     export_to_onnx(model, onnx_path, x_test, cfg.export.max_batch_size, cfg.export.half)
     export_to_openvino(onnx_path, ov_path)
     export_to_tensorrt(onnx_path, trt_path, cfg.export.half, cfg.export.max_batch_size)
-    export_to_tf(onnx_path, str(tf_path))
-    export_to_tflite(tf_path, tflite_path, cfg.export.half)
+    # export_to_tf(onnx_path, str(tf_path))
+    # export_to_tflite(tf_path, tflite_path, cfg.export.half)
 
 
 if __name__ == "__main__":

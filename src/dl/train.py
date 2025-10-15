@@ -451,6 +451,7 @@ def main(cfg: DictConfig) -> None:
             wandb_logger(None, val_metrics, epoch=cfg.train.epochs + 1, mode="val")
 
         test_metrics = {}
+        test_per_class_metrics = {}
         if trainer.test_loader:
             test_metrics, test_per_class_metrics = trainer.evaluate(
                 test_loader=trainer.test_loader,

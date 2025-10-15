@@ -14,10 +14,18 @@ def convert_pdf_to_jpg(pdf_path: Path, dpi: int = 200) -> None:
     """
     Convert pdf to .jpg format with specified DPI (default: 200).
     """
-    pages = pdfium.PdfDocument(pdf_path)
+    try:
+        pages = pdfium.PdfDocument(pdf_path)
+    except Exception as e:
+        loguru.logger.error(f"Can't open, deleting: {pdf_path.name}, error: {e}")
+        pdf_path.unlink()
+        return
     for i, page in enumerate(pages):
         pil_image = page.render(scale=dpi / 72.0).to_pil().convert("RGB")
-        output_path = pdf_path.with_name(f"{pdf_path.stem}_{i}.jpg")
+        if not i:
+            output_path = pdf_path.with_name(f"{pdf_path.stem}.jpg")
+        else:
+            output_path = pdf_path.with_name(f"{pdf_path.stem}_{i}.jpg")
         pil_image.save(output_path)
 
     pdf_path.unlink()
@@ -98,6 +106,14 @@ def main(cfg: DictConfig) -> None:
             for images_dir in data_path.iterdir():
                 if images_dir.is_dir() and not images_dir.name.startswith("."):
                     convert_images_to_jpg(images_dir, cfg.train.num_workers)
+
+    if paths["test_path"].exists():
+        convert_images_to_jpg(paths["test_path"], 4)
+
+
+# def main() -> None:
+#     data_path = Path("/Users/argosaakyan/Downloads/t")
+#     convert_images_to_jpg(data_path, 4)
 
 
 if __name__ == "__main__":

@@ -95,22 +95,22 @@ def vis_heatmap(img_pil, heatmap, output_path):
 
 
 def vis_gradcam(model, folder_to_run, output_path, target_layer, device):
-    for class_folder in folder_to_run.iterdir():
-        if class_folder.is_dir():
-            print("Processing", class_folder.name)
-            output_class_path = output_path / class_folder.name
-            output_class_path.mkdir(parents=True, exist_ok=True)
-            img_paths = [x for x in Path(class_folder).glob("*.jpg")]
+    print("Processing", folder_to_run.name)
+    output_class_path = output_path / folder_to_run.name
+    output_class_path.mkdir(parents=True, exist_ok=True)
+    img_paths = [
+        x for x in Path(folder_to_run).glob("**/*") if x.suffix.lower() in [".jpg", ".jpeg", ".png"]
+    ]
 
-            for img_path in tqdm(img_paths):
-                if img_path.is_file():
-                    img = cv2.imread(str(img_path))
-                    img_tensor = img_preprocess(img, device)
-                    img_tensor.requires_grad_()
-                    img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    for img_path in tqdm(img_paths):
+        if img_path.is_file():
+            img = cv2.imread(str(img_path))
+            img_tensor = img_preprocess(img, device)
+            img_tensor.requires_grad_()
+            img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
-                    heatmap = compute_gradcam(model, target_layer, img_tensor)
-                    vis_heatmap(img_pil, heatmap, output_class_path / f"{img_path.stem}.png")
+            heatmap = compute_gradcam(model, target_layer, img_tensor)
+            vis_heatmap(img_pil, heatmap, output_class_path / f"{img_path.stem}.png")
 
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
