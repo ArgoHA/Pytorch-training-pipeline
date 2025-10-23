@@ -31,6 +31,7 @@ train:
   img_size: [256, 256] # (h, w)
   to_visualize_eval: True # save images with gt and preds
   debug_img_processing: True # save images after preprocessing
+  to_save_errors: True # during bench saves images with incorrect prediction
 
   amp_enabled: True # use automatic mixed precision
   clip_max_norm: 1.0 # gradient clipping
@@ -55,15 +56,18 @@ train:
 
   ### Augs ###
   augs:
+    rotation_degree: 10 # maximum +- rotation
+    rotation_p: 0.05 # probability of the rotation (with above degree)
     multiscale_prob: 0.0
     rotate_90: 0.3
     left_right_flip: 0.3
     up_down_flip: 0.2
-    to_gray: 0
-    blur: 0
-    gamma: 0
+    to_gray: 0.0
+    blur: 0.0
+    gamma: 0.0
     brightness: 0.01
-    noise: 0
+    noise: 0.0
+    coarse_dropout: 0.0
 
   seed: 42
   cudnn_fixed: True
