@@ -19,15 +19,9 @@ class TFLiteModel:
         self.n_outputs = n_outputs
         self.model_path = model_path
 
-        self._init_params()
+        self.np_dtype = np.float32
         self._load_model()
         self._test_pred()
-
-    def _init_params(self) -> None:
-        if self.half:
-            self.np_dtype = np.float16
-        else:
-            self.np_dtype = np.float32
 
     def _load_model(self):
         # Load the TFLite model, allocate tensors and get input and output details

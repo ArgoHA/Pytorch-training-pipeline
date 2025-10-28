@@ -27,3 +27,6 @@ infer:
 
 vis:
 	python -m src.dl.vis
+
+tf_export:
+	python -m src.dl.tf_export
