@@ -1,16 +1,12 @@
 from pathlib import Path
 
 import hydra
-import onnx
 import openvino as ov
-
-# import tensorflow as tf
 import tensorrt as trt
 import torch
 import torch.onnx
+from loguru import logger
 from omegaconf import DictConfig
-
-# from onnx_tf.backend import prepare
 from torch import nn
 
 from src.dl.train import build_model
@@ -46,26 +42,32 @@ def export_to_onnx(
     torch.onnx.export(
         model,
         x_test,
-        onnx_path,
-        opset_version=12,
-        input_names=["input"],
-        output_names=["output"],
+        opset_version=19,
+        input_names=[INPUT_NAME],
+        output_names=[OUTPUT_NAME],
         dynamic_axes=dynamic_axes,
-    )
+        dynamo=True,
+    ).save(onnx_path)
+
+    logger.info("ONNX model exported")
 
 
-def export_to_openvino(onnx_path: Path, ov_path: Path) -> None:
-    model = ov.convert_model(input_model=str(onnx_path))
+def export_to_openvino(torch_model: nn.Module, ov_path: Path) -> None:
+    model = ov.convert_model(input_model=torch_model)
+    # rename inputs and outputs
+    model.inputs[0].tensor.set_names({INPUT_NAME})
+    model.outputs[0].tensor.set_names({OUTPUT_NAME})
     ov.serialize(model, str(ov_path.with_suffix(".xml")), str(ov_path.with_suffix(".bin")))
+    logger.info("OpenVINO model exported")
 
 
 def export_to_tensorrt(
     onnx_file_path: Path, trt_path: Path, half: bool, max_batch_size: int
 ) -> None:
-    logger = trt.Logger(trt.Logger.WARNING)
-    builder = trt.Builder(logger)
+    tr_logger = trt.Logger(trt.Logger.WARNING)
+    builder = trt.Builder(tr_logger)
     network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
-    parser = trt.OnnxParser(network, logger)
+    parser = trt.OnnxParser(network, tr_logger)
 
     with open(onnx_file_path, "rb") as model:
         if not parser.parse(model.read()):
@@ -95,23 +97,7 @@ def export_to_tensorrt(
 
     with open(trt_path, "wb") as f:
         f.write(engine)
-
-
-# def export_to_tf(onnx_model_path: Path, tf_path: str) -> None:
-#     onnx_model = onnx.load(onnx_model_path)
-#     tf_rep = prepare(onnx_model, auto_cast=True)
-#     tf_rep.export_graph(tf_path)
-
-
-# def export_to_tflite(tf_path: Path, tflite_path: str, half: bool) -> None:
-#     converter = tf.lite.TFLiteConverter.from_saved_model(str(tf_path))
-#     converter.optimizations = [tf.lite.Optimize.DEFAULT]
-#     if half:
-#         converter.target_spec.supported_types = [tf.float16]
-
-#     tflite_model = converter.convert()
-#     with open(tflite_path, "wb") as f:
-#         f.write(tflite_model)
+    logger.info("TensorRT model exported")
 
 
 @hydra.main(version_base=None, config_path="../../", config_name="config")
@@ -123,18 +109,16 @@ def main(cfg: DictConfig) -> None:
     trt_path = model_path.parent / "model.engine"
     onnx_path = model_path.parent / "model.onnx"
     ov_path = model_path.parent / "model.xml"
-    tf_path = model_path.parent / "tf"
-    tflite_path = model_path.parent / "model.tflite"
 
     model = load_model(cfg.model_name, model_path, num_classes, cfg.train.device)
 
     x_test = torch.randn(1, 3, *cfg.train.img_size, requires_grad=True).to(cfg.train.device)
 
     export_to_onnx(model, onnx_path, x_test, cfg.export.max_batch_size, cfg.export.half)
-    export_to_openvino(onnx_path, ov_path)
+    export_to_openvino(model, ov_path)
     export_to_tensorrt(onnx_path, trt_path, cfg.export.half, cfg.export.max_batch_size)
-    # export_to_tf(onnx_path, str(tf_path))
-    # export_to_tflite(tf_path, tflite_path, cfg.export.half)
+
+    logger.info(f"Exports saved to: {model_path.parent}")
 
 
 if __name__ == "__main__":
