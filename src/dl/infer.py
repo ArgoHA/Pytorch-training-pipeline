@@ -15,7 +15,9 @@ def run_prod_infer(
     model: Torch_model, path_to_data: Path, output_path: Path, label_to_name: Dict[int, str]
 ) -> List[int]:
     preds = []
-    img_paths = [x for x in Path(path_to_data).glob("*.jpg")]
+    img_paths = [
+        x for x in Path(path_to_data).glob("*") if x.suffix.lower() in [".jpg", ".jpeg", ".png"]
+    ]
 
     for img_path in tqdm(img_paths):
         img = cv2.imread(str(img_path))
