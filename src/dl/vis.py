@@ -1,4 +1,5 @@
 from pathlib import Path
+from shutil import rmtree
 
 import cv2
 import hydra
@@ -97,6 +98,8 @@ def vis_heatmap(img_pil, heatmap, output_path):
 def vis_gradcam(model, folder_to_run, output_path, target_layer, device):
     print("Processing", folder_to_run.name)
     output_class_path = output_path / folder_to_run.name
+    if output_class_path.exists():
+        rmtree(output_class_path)
     output_class_path.mkdir(parents=True, exist_ok=True)
     img_paths = [
         x for x in Path(folder_to_run).glob("**/*") if x.suffix.lower() in [".jpg", ".jpeg", ".png"]

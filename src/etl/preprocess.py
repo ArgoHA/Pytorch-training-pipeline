@@ -10,6 +10,12 @@ from pillow_heif import register_heif_opener
 from tqdm import tqdm
 
 
+def _convert_image_wrapper(args):
+    """Wrapper function for multiprocessing to handle tuple arguments"""
+    filepath, pdfs_only = args
+    return convert_image_to_jpg(filepath, pdfs_only)
+
+
 def convert_pdf_to_jpg(pdf_path: Path, dpi: int = 200) -> None:
     """
     Convert pdf to .jpg format with specified DPI (default: 200).
@@ -31,11 +37,11 @@ def convert_pdf_to_jpg(pdf_path: Path, dpi: int = 200) -> None:
     pdf_path.unlink()
 
 
-def convert_image_to_jpg(filepath: Path) -> None:
+def convert_image_to_jpg(filepath: Path, pdfs_only: bool) -> None:
     """
     Convert a single image file to .jpg format
     """
-    if filepath.suffix.lower() in [".tif", ".jpeg", ".png", ".tiff", ".heic"]:
+    if filepath.suffix.lower() in [".tif", ".jpeg", ".png", ".tiff", ".heic"] and not pdfs_only:
         try:
             image = Image.open(filepath).convert("RGB")
             image = ImageOps.exif_transpose(image)  # fix rotation
@@ -66,12 +72,12 @@ def convert_image_to_jpg(filepath: Path) -> None:
     elif filepath.suffix.lower() == ".pdf":
         convert_pdf_to_jpg(filepath)
 
-    elif filepath.suffix.lower() != ".jpg":
+    elif filepath.suffix.lower() != ".jpg" and not pdfs_only:
         print("NOT converted:", filepath.stem)
         filepath.unlink()
 
 
-def convert_images_to_jpg(dir_path: Path, num_threads: int) -> None:
+def convert_images_to_jpg(dir_path: Path, num_threads: int, pdfs_only: bool) -> None:
     """
     Convert all images in a directory to .jpg format
     """
@@ -82,7 +88,11 @@ def convert_images_to_jpg(dir_path: Path, num_threads: int) -> None:
             filepath for filepath in dir_path.glob("*") if not filepath.name.startswith(".")
         ]
 
-        for _ in tqdm(pool.imap_unordered(convert_image_to_jpg, filepaths)):
+        for _ in tqdm(
+            pool.imap_unordered(
+                _convert_image_wrapper, [(filepath, pdfs_only) for filepath in filepaths]
+            )
+        ):
             pass
 
     jpg_files = [f.stem for f in dir_path.iterdir() if f.suffix.lower() == ".jpg"]
@@ -99,16 +109,17 @@ def convert_images_to_jpg(dir_path: Path, num_threads: int) -> None:
 @hydra.main(version_base=None, config_path="../../", config_name="config")
 def main(cfg: DictConfig) -> None:
     paths = {"root_path": Path(cfg.train.data_path), "test_path": Path(cfg.train.path_to_test_data)}
+    pdfs_only = True
 
     for _, data_path in paths.items():
         print(data_path)
         if data_path.exists():
             for images_dir in data_path.iterdir():
                 if images_dir.is_dir() and not images_dir.name.startswith("."):
-                    convert_images_to_jpg(images_dir, cfg.train.num_workers)
+                    convert_images_to_jpg(images_dir, cfg.train.num_workers, pdfs_only)
 
     if paths["test_path"].exists():
-        convert_images_to_jpg(paths["test_path"], 4)
+        convert_images_to_jpg(paths["test_path"], 4, pdfs_only)
 
 
 # def main() -> None:
