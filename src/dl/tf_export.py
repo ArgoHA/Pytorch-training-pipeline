@@ -17,6 +17,18 @@ INPUT_NAME = "input"
 OUTPUT_NAME = "output"
 
 
+class ModelWithProcess(nn.Module):
+    def __init__(self, original_model: nn.Module) -> None:
+        super(ModelWithProcess, self).__init__()
+        self.original_model = original_model
+
+    def forward(self, input_image: torch.Tensor) -> torch.Tensor:
+        # Transpose from (BS, H, W, C) to (BS, C, H, W)
+        input_image = input_image.permute(0, 3, 1, 2)
+        output = self.original_model(input_image)
+        return output
+
+
 def load_model(model_name: str, model_path: Path, num_classes: int, device: str) -> nn.Module:
     model = build_model(
         model_name=model_name,
@@ -81,6 +93,9 @@ def main(cfg: DictConfig) -> None:
     device = "cpu"
 
     model = load_model(cfg.model_name, model_path, num_classes, device)
+    model = ModelWithProcess(model)
+    model.eval()
+
     x_test = torch.randn(1, 3, *cfg.train.img_size, requires_grad=True).to(device)
 
     onnx_path = model_path.parent / "model.onnx"
