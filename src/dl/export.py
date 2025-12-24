@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import hydra
+import onnx
 import openvino as ov
 import tensorrt as trt
 import torch
@@ -62,7 +63,9 @@ def export_to_openvino(torch_model: nn.Module, ov_path: Path) -> None:
 
 
 def export_to_tensorrt(
-    onnx_file_path: Path, trt_path: Path, half: bool, max_batch_size: int
+    onnx_file_path: Path,
+    half: bool,
+    max_batch_size: int,
 ) -> None:
     tr_logger = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(tr_logger)
@@ -77,25 +80,70 @@ def export_to_tensorrt(
             return
 
     config = builder.create_builder_config()
-    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)  # 1GB
+    # Increase workspace memory to help with larger batch sizes
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 2 << 30)  # 2GB
     if half:
         config.set_flag(trt.BuilderFlag.FP16)
 
-    # Create an optimization profile for batching
     if max_batch_size > 1:
         profile = builder.create_optimization_profile()
-        input_shape = network.get_input(0).shape
-        min_shape = (1, *input_shape[1:])
-        opt_shape = (max_batch_size, *input_shape[1:])
-        max_shape = (max_batch_size, *input_shape[1:])
-        profile.set_shape(INPUT_NAME, min_shape, opt_shape, max_shape)
+        input_tensor = network.get_input(0)
+        input_name = input_tensor.name
+
+        # Load ONNX model to get the actual input shape information
+        onnx_model = onnx.load(str(onnx_file_path))
+
+        # Find the input by name to ensure we get the correct one
+        input_shape_proto = None
+        for inp in onnx_model.graph.input:
+            if inp.name == input_name:
+                input_shape_proto = inp.type.tensor_type.shape
+                break
+
+        if input_shape_proto is None:
+            raise ValueError(
+                f"Could not find input '{input_name}' in ONNX model. "
+                f"Available inputs: {[inp.name for inp in onnx_model.graph.input]}"
+            )
+
+        # Extract static dimensions from ONNX model
+        # The first dimension (batch) should be dynamic, others should be static
+        static_dims = []
+        for i, dim in enumerate(input_shape_proto.dim[1:], start=1):  # Skip batch dimension
+            if dim.dim_value:
+                # Static dimension
+                static_dims.append(int(dim.dim_value))
+            elif dim.dim_param:
+                # Dynamic dimension (not allowed for non-batch dims in this case)
+                raise ValueError(
+                    f"Cannot create TensorRT optimization profile: input shape has dynamic "
+                    f"dimension at index {i} (beyond batch). Only batch dimension can be dynamic."
+                )
+            else:
+                raise ValueError(
+                    f"Cannot create TensorRT optimization profile: input shape dimension at "
+                    f"index {i} is undefined."
+                )
+
+        # Set the minimum and optimal batch size to 1, and allow the maximum batch size as provided.
+        min_shape = (1, *static_dims)
+        opt_shape = (1, *static_dims)
+        max_shape = (max_batch_size, *static_dims)
+
+        profile.set_shape(input_name, min_shape, opt_shape, max_shape)
         config.add_optimization_profile(profile)
 
     engine = builder.build_serialized_network(network, config)
     if engine is None:
-        raise ValueError("Failed to build TensorRT engine")
+        raise RuntimeError(
+            "Failed to build TensorRT engine. This can happen due to:\n"
+            "1. Insufficient GPU memory\n"
+            "2. Unsupported operations in the ONNX model\n"
+            "3. Issues with dynamic batch size configuration\n"
+            "Check the TensorRT logs above for more details."
+        )
 
-    with open(trt_path, "wb") as f:
+    with open(onnx_file_path.with_suffix(".engine"), "wb") as f:
         f.write(engine)
     logger.info("TensorRT model exported")
 
@@ -115,8 +163,8 @@ def main(cfg: DictConfig) -> None:
     x_test = torch.randn(1, 3, *cfg.train.img_size, requires_grad=True).to(cfg.train.device)
 
     export_to_onnx(model, onnx_path, x_test, cfg.export.max_batch_size, cfg.export.half)
-    export_to_openvino(model, ov_path)
-    export_to_tensorrt(onnx_path, trt_path, cfg.export.half, cfg.export.max_batch_size)
+    # export_to_openvino(model, ov_path)
+    # export_to_tensorrt(onnx_path, cfg.export.half, cfg.export.max_batch_size)
 
     logger.info(f"Exports saved to: {model_path.parent}")
 
