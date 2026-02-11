@@ -15,13 +15,13 @@ For model architecture, refer to [Torchvision](https://pytorch.org/vision/0.9/mo
 ## Usage
 To run the scripts, use the following commands:
 ```bash
-python -m src.etl.preprocess   # Converts images and PDFs to JPG format
-python -m src.etl.split        # Creates train, validation, and test CSVs with image paths
-python -m src.dl.train         # Runs the training pipeline
-python -m src.dl.export        # Exports weights in various formats after training
-python -m src.dl.bench         # Runs all exported models on the test set
-python -m src.dl.infer         # Runs inference on a test folder with subfolders as classes
-python -m src.dl.cnn_visualize # Creates a heatmap visualization based on the last convolutional layer gradients (Grad-CAM)
+make preprocess      # Converts images and PDFs to JPG format
+make split           # Creates train, validation, and test CSVs with image paths
+make train           # Runs the training pipeline
+make export          # Exports weights in various formats after training
+make bench           # Runs all exported models on the test set
+make infer           # Runs inference on a test folder with subfolders as classes
+make cnn_visualize   # Creates a heatmap visualization based on the last convolutional layer gradients (Grad-CAM)
 ```
 
 ## Inference

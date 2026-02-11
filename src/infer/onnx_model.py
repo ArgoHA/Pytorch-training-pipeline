@@ -76,18 +76,3 @@ class ONNX_model:
         logits = self._predict(image)
         label, max_prob = self._postprocess(logits)
         return label, max_prob
-
-
-if __name__ == "__main__":
-    # label_to_name = {0: "front", 1: "back", 2: "other"}
-    label_to_name = {0: "real", 1: "ai_gen"}
-    model_path = "/Users/argosaakyan/Data/Veryfi/ai_gen/models/ef_3_banana_2025-10-14/model.onnx"
-    img_path = "/Users/argosaakyan/Downloads/ec9e0cbc-a49d-41d8-8d12-9e0ff8e366b2.jpg"
-
-    model = ONNX_model(model_path=model_path, n_outputs=len(label_to_name), input_size=(640, 640))
-    img = cv2.imread(img_path)
-
-    start = time.perf_counter()
-    label, prob = model(img)
-
-    print(f"label: {label}, prob: {prob}, time: {(time.perf_counter() - start) * 1000:.4f} ms")

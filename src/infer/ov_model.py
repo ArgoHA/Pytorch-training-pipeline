@@ -19,6 +19,7 @@ class OV_model:
         n_outputs: int,
         input_size: Tuple[int, int] = (256, 256),  # (h, w)
         half: bool = False,
+        max_batch_size=1,
     ):
         self.mean_norm = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         self.std_norm = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -26,6 +27,7 @@ class OV_model:
         self.n_outputs = n_outputs
         self.model_path = model_path
         self.half = half
+        self.max_batch_size = max_batch_size
 
         self._init_params()
         self._load_model()
@@ -47,7 +49,13 @@ class OV_model:
         if self.device_name != "CPU":
             det_ov_model.reshape({0: [1, 3, *self.input_size]})
 
-        self.model = core.compile_model(det_ov_model, self.device_name)
+        inference_hint = "f16" if self.half else "f32"
+        inference_mode = "CUMULATIVE_THROUGHPUT" if self.max_batch_size > 1 else "LATENCY"
+        self.model = core.compile_model(
+            det_ov_model,
+            self.device_name,
+            config={"PERFORMANCE_HINT": inference_mode, "INFERENCE_PRECISION_HINT": inference_hint},
+        )
 
     def _test_pred(self) -> None:
         input_blob = np.zeros((1, 3, *self.input_size), dtype=self.np_dtype)
