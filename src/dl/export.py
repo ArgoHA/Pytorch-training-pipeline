@@ -163,8 +163,8 @@ def main(cfg: DictConfig) -> None:
     x_test = torch.randn(1, 3, *cfg.train.img_size, requires_grad=True).to(cfg.train.device)
 
     export_to_onnx(model, onnx_path, x_test, cfg.export.max_batch_size, cfg.export.half)
-    # export_to_openvino(model, ov_path)
-    # export_to_tensorrt(onnx_path, cfg.export.half, cfg.export.max_batch_size)
+    export_to_openvino(model, ov_path)
+    export_to_tensorrt(onnx_path, cfg.export.half, cfg.export.max_batch_size)
 
     logger.info(f"Exports saved to: {model_path.parent}")
 

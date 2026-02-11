@@ -96,7 +96,7 @@ def main(cfg: DictConfig) -> None:
     model = ModelWithProcess(model)
     model.eval()
 
-    x_test = torch.randn(1, 3, *cfg.train.img_size, requires_grad=True).to(device)
+    x_test = torch.randn(1, *cfg.train.img_size, 3, requires_grad=True).to(device)
 
     onnx_path = model_path.parent / "model.onnx"
     tf_path = model_path.parent / "tf"
