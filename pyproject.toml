@@ -76,7 +76,8 @@ demo = ["gradio>=6.16.0,<7"]
 # Niche single-script ETL helpers: etl/preprocess.py's PDF and HEIC readers.
 extra = [
     "pypdfium2>=4.30.0",
-    "pillow-heif>=0.18.0",
+    # Floor set by CVE-2026-84383
+    "pillow-heif>=1.7.0",
 ]
 all = [
     "img-clf[export]",
